@@ -1,0 +1,2170 @@
+<?php
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+if (!class_exists('UCG_Admin')) {
+    class UCG_Admin {
+        const NOTICE_QUERY = 'ucg_notice';
+        const NOTICE_TYPE_QUERY = 'ucg_notice_type';
+        const READY_TEMPLATE_INSTALLS_OPTION = 'ucg_ready_template_installs_v1';
+        protected $last_prompt_library_error = '';
+
+        public function hooks() {
+            add_action('admin_menu', array($this, 'add_menu'));
+            add_action('admin_init', array($this, 'register_settings'));
+            add_action('admin_enqueue_scripts', array($this, 'enqueue_assets'));
+
+            add_action('wp_ajax_ucg_test_connection', array($this, 'ajax_test_connection'));
+            add_action('wp_ajax_ucg_get_balance', array($this, 'ajax_get_balance'));
+            add_action('wp_ajax_ucg_get_tokens', array($this, 'ajax_get_tokens'));
+            add_action('wp_ajax_ucg_save_api_key', array($this, 'ajax_save_api_key'));
+            add_action('wp_ajax_ucg_delete_api_key', array($this, 'ajax_delete_api_key'));
+            add_action('wp_ajax_ucg_save_batch_size', array($this, 'ajax_save_batch_size'));
+            add_action('wp_ajax_ucg_wizard_schema', array($this, 'ajax_wizard_schema'));
+            add_action('wp_ajax_ucg_wizard_preview', array($this, 'ajax_wizard_preview'));
+            add_action('wp_ajax_ucg_wizard_load_template', array($this, 'ajax_wizard_load_template'));
+            add_action('wp_ajax_ucg_wizard_create_run', array($this, 'ajax_wizard_create_run'));
+            add_action('wp_ajax_ucg_run_status', array($this, 'ajax_run_status'));
+            add_action('wp_ajax_ucg_search_runs', array($this, 'ajax_search_runs'));
+
+            add_action('admin_post_ucg_save_template', array($this, 'handle_save_template'));
+            add_action('admin_post_ucg_delete_template', array($this, 'handle_delete_template'));
+            add_action('admin_post_ucg_install_ready_template', array($this, 'handle_install_ready_template'));
+            add_action('admin_post_ucg_delete_ready_template', array($this, 'handle_delete_ready_template'));
+            add_action('admin_post_ucg_create_run', array($this, 'handle_create_run'));
+            add_action('admin_post_ucg_review_bulk', array($this, 'handle_review_bulk'));
+            add_action('admin_post_ucg_process_now', array($this, 'handle_process_now'));
+        }
+
+        public function add_menu() {
+            $review_pending_count = UCG_DB::count_review_items(0, 'generated');
+            $review_badge = $this->build_menu_counter_badge($review_pending_count);
+
+            add_menu_page(
+                __('AI-Контент', 'unicontent-ai-generator'),
+                __('AI-Контент', 'unicontent-ai-generator') . $review_badge,
+                'manage_options',
+                'ucg-dashboard',
+                array($this, 'render_dashboard'),
+                'dashicons-welcome-write-blog',
+                57
+            );
+
+            add_submenu_page('ucg-dashboard', __('Дашборд', 'unicontent-ai-generator'), __('Дашборд', 'unicontent-ai-generator'), 'manage_options', 'ucg-dashboard', array($this, 'render_dashboard'));
+            add_submenu_page('ucg-dashboard', __('Шаблоны', 'unicontent-ai-generator'), __('Шаблоны', 'unicontent-ai-generator'), 'manage_options', 'ucg-templates', array($this, 'render_templates'));
+            add_submenu_page('ucg-dashboard', __('Генерация', 'unicontent-ai-generator'), __('Генерация', 'unicontent-ai-generator'), 'manage_options', 'ucg-generate', array($this, 'render_generate'));
+            add_submenu_page('ucg-dashboard', __('Проверка', 'unicontent-ai-generator'), __('Проверка', 'unicontent-ai-generator') . $review_badge, 'manage_options', 'ucg-review', array($this, 'render_review'));
+            add_submenu_page('ucg-dashboard', __('История', 'unicontent-ai-generator'), __('История', 'unicontent-ai-generator'), 'manage_options', 'ucg-runs', array($this, 'render_runs'));
+            add_submenu_page('ucg-dashboard', __('Настройки', 'unicontent-ai-generator'), __('Настройки', 'unicontent-ai-generator'), 'manage_options', 'ucg-settings', array($this, 'render_settings'));
+            add_submenu_page(null, __('Готовые шаблоны', 'unicontent-ai-generator'), __('Готовые шаблоны', 'unicontent-ai-generator'), 'manage_options', 'ucg-ready-templates', array($this, 'render_ready_templates'));
+            add_submenu_page(null, __('Прогресс запуска', 'unicontent-ai-generator'), __('Прогресс запуска', 'unicontent-ai-generator'), 'manage_options', 'ucg-run-progress', array($this, 'render_run_progress'));
+        }
+
+        public function register_settings() {
+            register_setting(
+                'ucg_settings_group',
+                UCG_Settings::OPTION_KEY,
+                array(
+                    'type' => 'array',
+                    'sanitize_callback' => array('UCG_Settings', 'sanitize'),
+                    'default' => UCG_Settings::defaults(),
+                )
+            );
+        }
+
+        public function enqueue_assets($hook) {
+            $hook = (string) $hook;
+            if (strpos($hook, 'ucg-') === false && strpos($hook, 'ucg_dashboard') === false) {
+                return;
+            }
+
+            $script_deps = array('jquery', 'ucg-tom-select');
+            wp_enqueue_style('ucg-tom-select', UCG_PLUGIN_URL . 'assets/vendor/tom-select/tom-select.css', array(), UCG_VERSION);
+            wp_enqueue_script('ucg-tom-select', UCG_PLUGIN_URL . 'assets/vendor/tom-select/tom-select.complete.min.js', array(), UCG_VERSION, true);
+            wp_enqueue_style('ucg-admin', UCG_PLUGIN_URL . 'assets/admin.css', array(), UCG_VERSION);
+            wp_enqueue_script('ucg-admin', UCG_PLUGIN_URL . 'assets/admin.js', $script_deps, UCG_VERSION, true);
+
+            wp_localize_script(
+                'ucg-admin',
+                'ucgAdmin',
+                array(
+                    'ajaxUrl' => admin_url('admin-ajax.php'),
+                    'nonce' => wp_create_nonce('ucg_admin_nonce'),
+                    'strings' => array(
+                        'testing' => __('Проверяем подключение...', 'unicontent-ai-generator'),
+                        'loading' => __('Обновляем баланс...', 'unicontent-ai-generator'),
+                        'saving' => __('Сохраняем API ключ...', 'unicontent-ai-generator'),
+                        'saving_batch' => __('Сохраняем настройки...', 'unicontent-ai-generator'),
+                        'starting_run' => __('Создаем запуск...', 'unicontent-ai-generator'),
+                        'polling_run' => __('Обновляем прогресс...', 'unicontent-ai-generator'),
+                    ),
+                    'i18n' => class_exists('UCG_I18n') ? UCG_I18n::get_js_i18n_map() : array(),
+                ),
+            );
+        }
+
+        public function render_dashboard() {
+            $stats = UCG_DB::count_runs_by_status();
+            $recent_runs = UCG_DB::get_runs(8, 0);
+            $settings = UCG_Settings::get();
+            $masked_api_key = UCG_Settings::get_masked_api_key();
+            $api_ready = UCG_Settings::has_valid_api_key();
+            $header_balance = $this->get_header_balance_snapshot();
+            ob_start();
+            include UCG_PLUGIN_DIR . 'templates/page-dashboard.php';
+            $html = (string) ob_get_clean();
+            echo class_exists('UCG_I18n') ? UCG_I18n::translate_markup($html) : $html;
+        }
+
+        public function render_settings() {
+            $settings = UCG_Settings::get();
+            $masked_api_key = UCG_Settings::get_masked_api_key();
+            $api_ready = UCG_Settings::has_valid_api_key();
+            $header_balance = $this->get_header_balance_snapshot();
+            ob_start();
+            include UCG_PLUGIN_DIR . 'templates/page-settings.php';
+            $html = (string) ob_get_clean();
+            echo class_exists('UCG_I18n') ? UCG_I18n::translate_markup($html) : $html;
+        }
+
+        public function render_templates() {
+            $post_types = UCG_Tokens::get_post_types_for_ui();
+            $selected_post_type = sanitize_key($this->get_request_string($_GET, 'post_type', UCG_Tokens::get_default_post_type()));
+            if ($selected_post_type === '' || !post_type_exists($selected_post_type)) {
+                $selected_post_type = UCG_Tokens::get_default_post_type();
+            }
+
+            $edit_template_id = $this->get_request_int($_GET, 'edit', 0);
+            $editing_template = $edit_template_id > 0 ? UCG_DB::get_template($edit_template_id) : null;
+            if ($editing_template && !empty($editing_template['post_type'])) {
+                $selected_post_type = sanitize_key((string) $editing_template['post_type']);
+            }
+
+            $templates = UCG_DB::get_templates();
+            $tokens = UCG_Tokens::get_prompt_tokens_for_post_type($selected_post_type);
+            $text_length_data = $this->get_text_length_options();
+            $text_length_options = isset($text_length_data['options']) && is_array($text_length_data['options']) ? $text_length_data['options'] : array();
+            $text_length_hint = isset($text_length_data['hint']) ? (string) $text_length_data['hint'] : '';
+            $default_length_option_id = isset($text_length_data['default_option_id']) ? (int) $text_length_data['default_option_id'] : 0;
+            $header_balance = $this->get_header_balance_snapshot();
+
+            ob_start();
+            include UCG_PLUGIN_DIR . 'templates/page-templates.php';
+            $html = (string) ob_get_clean();
+            echo class_exists('UCG_I18n') ? UCG_I18n::translate_markup($html) : $html;
+        }
+
+        public function render_ready_templates() {
+            $post_types = UCG_Tokens::get_post_types_for_ui();
+            $selected_post_type = sanitize_key($this->get_request_string($_GET, 'post_type', UCG_Tokens::get_default_post_type()));
+            if ($selected_post_type === '' || !post_type_exists($selected_post_type)) {
+                $selected_post_type = UCG_Tokens::get_default_post_type();
+            }
+
+            $ready_prompts = $this->get_ready_wordpress_prompts(false);
+            $ready_template_types = $this->get_prompt_type_filters($ready_prompts);
+            $ready_installed_templates = $this->get_ready_installed_templates_map();
+            $ready_prompts_error = $this->get_last_prompt_library_error();
+            $header_balance = $this->get_header_balance_snapshot();
+
+            ob_start();
+            include UCG_PLUGIN_DIR . 'templates/page-ready-templates.php';
+            $html = (string) ob_get_clean();
+            echo class_exists('UCG_I18n') ? UCG_I18n::translate_markup($html) : $html;
+        }
+
+        public function render_generate() {
+            $post_types = UCG_Tokens::get_post_types_for_ui();
+            $post_type = sanitize_key($this->get_request_string($_GET, 'post_type', UCG_Tokens::get_default_post_type()));
+            if ($post_type === '' || !post_type_exists($post_type)) {
+                $post_type = UCG_Tokens::get_default_post_type();
+            }
+
+            $api_ready = UCG_Settings::has_valid_api_key();
+            $wizard_schema = $this->build_wizard_schema($post_type, false);
+            $target_fields = isset($wizard_schema['target_fields']) && is_array($wizard_schema['target_fields'])
+                ? $wizard_schema['target_fields']
+                : array();
+            if (empty($target_fields)) {
+                $target_fields = array(
+                    array('value' => 'post:post_content', 'label' => __('Содержание (post_content)', 'unicontent-ai-generator')),
+                    array('value' => 'post:post_title', 'label' => __('Заголовок (post_title)', 'unicontent-ai-generator')),
+                    array('value' => 'post:post_excerpt', 'label' => __('Краткое описание (post_excerpt)', 'unicontent-ai-generator')),
+                );
+            }
+            $text_length_options = isset($wizard_schema['text_length_options']) && is_array($wizard_schema['text_length_options'])
+                ? $wizard_schema['text_length_options']
+                : array();
+            if (empty($text_length_options)) {
+                $text_length_options = array(
+                    array('id' => 1, 'name' => __('Короткое', 'unicontent-ai-generator'), 'max_chars' => 500, 'credits_cost' => 1),
+                    array('id' => 2, 'name' => __('Стандартное', 'unicontent-ai-generator'), 'max_chars' => 1500, 'credits_cost' => 3),
+                    array('id' => 3, 'name' => __('Расширенное', 'unicontent-ai-generator'), 'max_chars' => 3000, 'credits_cost' => 6),
+                    array('id' => 4, 'name' => __('Большое', 'unicontent-ai-generator'), 'max_chars' => 5000, 'credits_cost' => 10),
+                );
+            }
+            $default_length_option_id = isset($wizard_schema['default_length_option_id'])
+                ? (int) $wizard_schema['default_length_option_id']
+                : 0;
+            if ($default_length_option_id <= 0 && !empty($text_length_options[0]['id'])) {
+                $default_length_option_id = (int) $text_length_options[0]['id'];
+            }
+            $wizard_templates = isset($wizard_schema['templates']) && is_array($wizard_schema['templates']) ? $wizard_schema['templates'] : array();
+            $wizard_default_template_id = 0;
+            foreach ($wizard_templates as $wizard_template_item) {
+                if (!is_array($wizard_template_item)) {
+                    continue;
+                }
+                $template_id = isset($wizard_template_item['id']) ? (int) $wizard_template_item['id'] : 0;
+                if ($template_id <= 0) {
+                    continue;
+                }
+                if ($wizard_default_template_id <= 0 && !empty($wizard_template_item['is_default'])) {
+                    $wizard_default_template_id = $template_id;
+                }
+            }
+            $header_balance = $this->get_header_balance_snapshot();
+
+            ob_start();
+            include UCG_PLUGIN_DIR . 'templates/page-generate.php';
+            $html = (string) ob_get_clean();
+            echo class_exists('UCG_I18n') ? UCG_I18n::translate_markup($html) : $html;
+        }
+
+        public function render_review() {
+            $run_id = $this->get_request_int($_GET, 'run_id', 0);
+            $status = sanitize_key($this->get_request_string($_GET, 'status', 'generated'));
+            $status = in_array($status, array('generated', 'approved', 'rejected', 'failed'), true) ? $status : 'generated';
+
+            $paged = max(1, $this->get_request_int($_GET, 'paged', 1));
+            $per_page = 20;
+            $offset = ($paged - 1) * $per_page;
+
+            $items = UCG_DB::get_review_items($run_id, $status, $per_page, $offset);
+            $total_items = UCG_DB::count_review_items($run_id, $status);
+            $total_pages = max(1, (int) ceil($total_items / $per_page));
+            $runs = UCG_DB::get_runs_for_select();
+            $header_balance = $this->get_header_balance_snapshot();
+
+            ob_start();
+            include UCG_PLUGIN_DIR . 'templates/page-review.php';
+            $html = (string) ob_get_clean();
+            echo class_exists('UCG_I18n') ? UCG_I18n::translate_markup($html) : $html;
+        }
+
+        public function render_runs() {
+            $runs = UCG_DB::get_runs(100, 0);
+            $header_balance = $this->get_header_balance_snapshot();
+            ob_start();
+            include UCG_PLUGIN_DIR . 'templates/page-runs.php';
+            $html = (string) ob_get_clean();
+            echo class_exists('UCG_I18n') ? UCG_I18n::translate_markup($html) : $html;
+        }
+
+        public function render_run_progress() {
+            $run_id = $this->get_request_int($_GET, 'run_id', 0);
+            $run = $run_id > 0 ? UCG_DB::get_run($run_id) : null;
+
+            ob_start();
+            include UCG_PLUGIN_DIR . 'templates/page-run-progress.php';
+            $html = (string) ob_get_clean();
+            echo class_exists('UCG_I18n') ? UCG_I18n::translate_markup($html) : $html;
+        }
+
+        public function handle_save_template() {
+            $this->guard_admin_post('ucg_save_template');
+
+            $template_id = $this->get_request_int($_POST, 'template_id', 0);
+            $name = sanitize_text_field($this->get_request_string($_POST, 'name', ''));
+            $post_type = sanitize_key($this->get_request_string($_POST, 'post_type', ''));
+            $body = sanitize_textarea_field($this->get_request_string($_POST, 'body', ''));
+            $is_default = !empty($_POST['is_default']) ? 1 : 0;
+            $vary_length = !empty($_POST['vary_length']) ? 1 : 0;
+            $length_option_id = $this->resolve_length_option_id($this->get_request_int($_POST, 'length_option_id', 0));
+
+            if ($name === '' || $post_type === '' || $body === '' || !post_type_exists($post_type)) {
+                $this->redirect_with_notice('ucg-templates', __('Заполните название, post type и текст шаблона.', 'unicontent-ai-generator'), 'error');
+            }
+            if ($length_option_id <= 0) {
+                $this->redirect_with_notice('ucg-templates', __('Выберите диапазон длины текста.', 'unicontent-ai-generator'), 'error');
+            }
+
+            if ($template_id > 0) {
+                $ok = UCG_DB::update_template($template_id, $name, $post_type, $body, $is_default, $length_option_id, $vary_length);
+                if (!$ok) {
+                    $this->redirect_with_notice('ucg-templates', __('Не удалось обновить шаблон.', 'unicontent-ai-generator'), 'error');
+                }
+                $this->redirect_with_notice('ucg-templates', __('Шаблон обновлен.', 'unicontent-ai-generator'));
+            }
+
+            $created_id = UCG_DB::create_template($name, $post_type, $body, $is_default, $length_option_id, $vary_length);
+            if ($created_id <= 0) {
+                $this->redirect_with_notice('ucg-templates', __('Не удалось создать шаблон.', 'unicontent-ai-generator'), 'error');
+            }
+
+            $this->redirect_with_notice('ucg-templates', __('Шаблон создан.', 'unicontent-ai-generator'));
+        }
+
+        public function handle_delete_template() {
+            $this->guard_admin_post('ucg_delete_template');
+
+            $template_id = $this->get_request_int($_POST, 'template_id', 0);
+            if ($template_id <= 0) {
+                $this->redirect_with_notice('ucg-templates', __('Некорректный ID шаблона.', 'unicontent-ai-generator'), 'error');
+            }
+
+            $ok = UCG_DB::delete_template($template_id);
+            if (!$ok) {
+                $this->redirect_with_notice('ucg-templates', __('Не удалось удалить шаблон.', 'unicontent-ai-generator'), 'error');
+            }
+
+            $this->redirect_with_notice('ucg-templates', __('Шаблон удален.', 'unicontent-ai-generator'));
+        }
+
+        public function handle_install_ready_template() {
+            $this->guard_admin_post('ucg_install_ready_template');
+            $redirect_page = $this->resolve_ready_templates_redirect_page($_POST);
+
+            if (!UCG_Settings::has_valid_api_key()) {
+                $this->redirect_ready_templates_notice($redirect_page, __('Сначала добавьте и проверьте API ключ.', 'unicontent-ai-generator'), 'error');
+            }
+
+            $prompt_id = $this->get_request_int($_POST, 'prompt_id', 0);
+            if ($prompt_id <= 0) {
+                $this->redirect_ready_templates_notice($redirect_page, __('Некорректный ID готового шаблона.', 'unicontent-ai-generator'), 'error');
+            }
+
+            $post_type = sanitize_key($this->get_request_string($_POST, 'post_type', UCG_Tokens::get_default_post_type()));
+            if ($post_type === '' || !post_type_exists($post_type)) {
+                $post_type = UCG_Tokens::get_default_post_type();
+            }
+
+            $prompt = $this->find_ready_prompt_by_id($prompt_id, true);
+            if (!$prompt) {
+                $this->redirect_ready_templates_notice($redirect_page, __('Готовый шаблон не найден в библиотеке UNICONTENT.', 'unicontent-ai-generator'), 'error', $post_type);
+            }
+
+            $name = isset($prompt['name']) ? trim((string) $prompt['name']) : '';
+            $body = isset($prompt['body']) ? (string) $prompt['body'] : '';
+            if ($name === '' || trim($body) === '') {
+                $this->redirect_ready_templates_notice($redirect_page, __('Не удалось установить шаблон: пустое имя или текст.', 'unicontent-ai-generator'), 'error', $post_type);
+            }
+
+            $text_length_data = $this->get_text_length_options();
+            $length_options = isset($text_length_data['options']) && is_array($text_length_data['options']) ? $text_length_data['options'] : array();
+            $default_length_option_id = $this->resolve_length_option_id(0, $length_options);
+            if ($default_length_option_id <= 0) {
+                $this->redirect_ready_templates_notice($redirect_page, __('Выберите диапазон длины текста перед установкой.', 'unicontent-ai-generator'), 'error', $post_type);
+            }
+
+            $installs = $this->get_ready_template_installs();
+            $prompt_key = (string) $prompt_id;
+            $installed_template_id = isset($installs[$prompt_key]['template_id']) ? (int) $installs[$prompt_key]['template_id'] : 0;
+            $template_id = 0;
+
+            if ($installed_template_id > 0) {
+                $existing_template = UCG_DB::get_template($installed_template_id);
+                if ($existing_template) {
+                    $existing_length_option_id = isset($existing_template['length_option_id']) ? (int) $existing_template['length_option_id'] : 0;
+                    $resolved_existing_length_option_id = $this->resolve_length_option_id($existing_length_option_id, $length_options);
+                    $next_length_option_id = $resolved_existing_length_option_id > 0
+                        ? $resolved_existing_length_option_id
+                        : $default_length_option_id;
+
+                    $updated = UCG_DB::update_template(
+                        $installed_template_id,
+                        $name,
+                        $post_type,
+                        $body,
+                        !empty($existing_template['is_default']) ? 1 : 0,
+                        $next_length_option_id,
+                        !empty($existing_template['vary_length']) ? 1 : 0
+                    );
+                    if ($updated) {
+                        $template_id = $installed_template_id;
+                    }
+                }
+            }
+
+            if ($template_id <= 0) {
+                $template_id = UCG_DB::create_template($name, $post_type, $body, 0, $default_length_option_id, 0);
+                if ($template_id <= 0) {
+                    $this->redirect_ready_templates_notice($redirect_page, __('Не удалось установить готовый шаблон.', 'unicontent-ai-generator'), 'error', $post_type);
+                }
+            }
+
+            $installs[$prompt_key] = array(
+                'template_id' => (int) $template_id,
+                'post_type' => $post_type,
+                'prompt_slug' => isset($prompt['slug']) ? sanitize_key((string) $prompt['slug']) : '',
+                'updated_at' => current_time('mysql', true),
+            );
+            $this->save_ready_template_installs($installs);
+
+            $this->redirect_ready_templates_notice($redirect_page, __('Готовый шаблон установлен.', 'unicontent-ai-generator'), 'success', $post_type);
+        }
+
+        public function handle_delete_ready_template() {
+            $this->guard_admin_post('ucg_delete_ready_template');
+            $redirect_page = $this->resolve_ready_templates_redirect_page($_POST);
+            $post_type = sanitize_key($this->get_request_string($_POST, 'post_type', UCG_Tokens::get_default_post_type()));
+            if ($post_type === '' || !post_type_exists($post_type)) {
+                $post_type = UCG_Tokens::get_default_post_type();
+            }
+
+            $prompt_id = $this->get_request_int($_POST, 'prompt_id', 0);
+            if ($prompt_id <= 0) {
+                $this->redirect_ready_templates_notice($redirect_page, __('Некорректный ID готового шаблона.', 'unicontent-ai-generator'), 'error', $post_type);
+            }
+
+            $installs = $this->get_ready_template_installs();
+            $prompt_key = (string) $prompt_id;
+            $installed_template_id = isset($installs[$prompt_key]['template_id']) ? (int) $installs[$prompt_key]['template_id'] : 0;
+            if ($installed_template_id > 0) {
+                UCG_DB::delete_template($installed_template_id);
+            }
+
+            unset($installs[$prompt_key]);
+            $this->save_ready_template_installs($installs);
+
+            $this->redirect_ready_templates_notice($redirect_page, __('Готовый шаблон удален.', 'unicontent-ai-generator'), 'success', $post_type);
+        }
+
+        public function handle_create_run() {
+            $this->guard_admin_post('ucg_create_run');
+
+            if (!UCG_Settings::has_valid_api_key()) {
+                $this->redirect_with_notice('ucg-dashboard', __('Сначала добавьте и проверьте API ключ.', 'unicontent-ai-generator'), 'error');
+            }
+
+            $post_type = sanitize_key($this->get_request_string($_POST, 'post_type', ''));
+            $target_field = sanitize_text_field($this->get_request_string($_POST, 'target_field', ''));
+            $template_id = $this->get_request_int($_POST, 'template_id', 0);
+            $scope = sanitize_key($this->get_request_string($_POST, 'generation_scope', 'selected'));
+            $status_filter = sanitize_key($this->get_request_string($_POST, 'status_filter', 'publish'));
+            $status_filter = $this->normalize_status_filter($status_filter);
+            $search = sanitize_text_field($this->get_request_string($_POST, 'search', ''));
+
+            if ($post_type === '' || !post_type_exists($post_type)) {
+                $this->redirect_with_notice('ucg-generate', __('Некорректный post type.', 'unicontent-ai-generator'), 'error');
+            }
+
+            $allowed_target_fields = UCG_Tokens::get_target_fields_for_post_type($post_type);
+            $allowed_map = array();
+            foreach ($allowed_target_fields as $field_item) {
+                if (!empty($field_item['value'])) {
+                    $allowed_map[(string) $field_item['value']] = true;
+                }
+            }
+            if (!isset($allowed_map[$target_field])) {
+                $this->redirect_with_notice('ucg-generate', __('Выберите корректное целевое поле.', 'unicontent-ai-generator'), 'error');
+            }
+
+            $post_ids = array();
+            if ($scope === 'filtered') {
+                $post_ids = $this->collect_filtered_post_ids($post_type, $status_filter, $search, 50000);
+            } else {
+                $raw_ids = isset($_POST['post_ids']) ? (array) $_POST['post_ids'] : array();
+                foreach ($raw_ids as $raw_id) {
+                    $post_id = (int) $raw_id;
+                    if ($post_id > 0) {
+                        $post_ids[] = $post_id;
+                    }
+                }
+            }
+
+            $post_ids = array_values(array_unique($post_ids));
+            if (empty($post_ids)) {
+                $this->redirect_with_notice('ucg-generate', __('Не выбраны записи для генерации.', 'unicontent-ai-generator'), 'error');
+            }
+
+            $options = array(
+                'scope' => $scope,
+                'status_filter' => $status_filter,
+                'search' => $search,
+            );
+
+            $run_id = UCG_DB::create_run($post_type, $target_field, $template_id, get_current_user_id(), $options);
+            if ($run_id <= 0) {
+                $this->redirect_with_notice('ucg-generate', __('Не удалось создать запуск.', 'unicontent-ai-generator'), 'error');
+            }
+
+            $added_items = UCG_DB::add_run_items($run_id, $post_ids);
+            if ($added_items <= 0) {
+                UCG_DB::update_run(
+                    $run_id,
+                    array(
+                        'status' => 'failed',
+                        'error_message' => __('Не удалось добавить записи в очередь.', 'unicontent-ai-generator'),
+                        'finished_at' => current_time('mysql', true),
+                    )
+                );
+                $this->redirect_with_notice('ucg-generate', __('Не удалось добавить записи в очередь.', 'unicontent-ai-generator'), 'error');
+            }
+
+            UCG_Generator::kickstart_queue(0);
+
+            $this->redirect_with_notice('ucg-runs', sprintf(__('Запуск #%d создан. В очереди: %d.', 'unicontent-ai-generator'), $run_id, $added_items));
+        }
+
+        public function handle_review_bulk() {
+            $this->guard_admin_post('ucg_review_bulk');
+
+            $action = sanitize_key($this->get_request_string($_POST, 'bulk_action', ''));
+            if (!in_array($action, array('approve', 'reject'), true)) {
+                $this->redirect_with_notice('ucg-review', __('Выберите действие: одобрить или отклонить.', 'unicontent-ai-generator'), 'error');
+            }
+
+            $raw_ids = isset($_POST['item_ids']) ? (array) $_POST['item_ids'] : array();
+            $item_ids = array();
+            foreach ($raw_ids as $raw_id) {
+                $item_id = (int) $raw_id;
+                if ($item_id > 0) {
+                    $item_ids[] = $item_id;
+                }
+            }
+            $item_ids = array_values(array_unique($item_ids));
+
+            if (empty($item_ids)) {
+                $this->redirect_with_notice('ucg-review', __('Выберите хотя бы один элемент.', 'unicontent-ai-generator'), 'error');
+            }
+
+            $success = 0;
+            $failed = 0;
+            $touched_runs = array();
+
+            foreach ($item_ids as $item_id) {
+                $item = UCG_DB::get_run_item_with_run($item_id);
+                if (!$item || (string) $item['status'] !== 'generated') {
+                    continue;
+                }
+
+                $touched_runs[] = (int) $item['run_id'];
+
+                if ($action === 'approve') {
+                    $write_result = UCG_Tokens::write_generated_value((int) $item['post_id'], (string) $item['target_field'], (string) $item['generated_text']);
+                    if (is_wp_error($write_result)) {
+                        UCG_DB::update_run_item(
+                            $item_id,
+                            array(
+                                'status' => 'failed',
+                                'error_message' => $write_result->get_error_message(),
+                            )
+                        );
+                        $failed++;
+                        continue;
+                    }
+
+                    UCG_DB::update_run_item(
+                        $item_id,
+                        array(
+                            'status' => 'approved',
+                            'reviewed_at' => current_time('mysql', true),
+                            'error_message' => '',
+                        )
+                    );
+                    $success++;
+                    continue;
+                }
+
+                UCG_DB::update_run_item(
+                    $item_id,
+                    array(
+                        'status' => 'rejected',
+                        'reviewed_at' => current_time('mysql', true),
+                    )
+                );
+                $success++;
+            }
+
+            foreach (array_unique($touched_runs) as $run_id) {
+                $run_id = (int) $run_id;
+                if ($run_id > 0) {
+                    UCG_DB::recalculate_run_counters($run_id);
+                }
+            }
+
+            $notice = sprintf(__('Выполнено: %d. Ошибок: %d.', 'unicontent-ai-generator'), $success, $failed);
+            $this->redirect_with_notice('ucg-review', $notice, $failed > 0 ? 'warning' : 'success');
+        }
+
+        public function handle_process_now() {
+            $this->guard_admin_post('ucg_process_now');
+
+            $generator = new UCG_Generator();
+            $generator->process_queue(true);
+
+            $this->redirect_with_notice('ucg-runs', __('Очередь обработана одним шагом.', 'unicontent-ai-generator'));
+        }
+
+        public function ajax_test_connection() {
+            $this->guard_ajax();
+
+            $client = new UCG_Api_Client();
+            $result = $client->test_connection();
+            if (is_wp_error($result)) {
+                wp_send_json_error(array('message' => $result->get_error_message()));
+            }
+
+            $ttl = (int) UCG_Settings::get_option('credits_cache_ttl', 60);
+            $ttl = max(10, min(600, $ttl));
+            set_transient('ucg_balance_cache', $result, $ttl);
+
+            wp_send_json_success(
+                array(
+                    'message' => __('Подключение к API работает.', 'unicontent-ai-generator'),
+                    'credits' => isset($result['credits']) ? (float) $result['credits'] : 0,
+                    'api_key' => isset($result['api_key']) ? (string) $result['api_key'] : '',
+                )
+            );
+        }
+
+        public function ajax_get_balance() {
+            $this->guard_ajax();
+
+            $force = !empty($_POST['force']);
+            $cached = get_transient('ucg_balance_cache');
+            if (!$force && is_array($cached)) {
+                wp_send_json_success(
+                    array(
+                        'credits' => isset($cached['credits']) ? (float) $cached['credits'] : 0,
+                        'api_key' => isset($cached['api_key']) ? (string) $cached['api_key'] : '',
+                        'cached' => true,
+                    )
+                );
+            }
+
+            $client = new UCG_Api_Client();
+            $result = $client->get_balance();
+            if (is_wp_error($result)) {
+                wp_send_json_error(array('message' => $result->get_error_message()));
+            }
+
+            $ttl = (int) UCG_Settings::get_option('credits_cache_ttl', 60);
+            $ttl = max(10, min(600, $ttl));
+            set_transient('ucg_balance_cache', $result, $ttl);
+
+            wp_send_json_success(
+                array(
+                    'credits' => isset($result['credits']) ? (float) $result['credits'] : 0,
+                    'api_key' => isset($result['api_key']) ? (string) $result['api_key'] : '',
+                    'cached' => false,
+                )
+            );
+        }
+
+        public function ajax_get_tokens() {
+            $this->guard_ajax();
+
+            $post_type = sanitize_key($this->get_request_string($_POST, 'post_type', ''));
+            if ($post_type === '' || !post_type_exists($post_type)) {
+                wp_send_json_error(array('message' => __('Некорректный post type.', 'unicontent-ai-generator')));
+            }
+
+            $tokens = UCG_Tokens::get_prompt_tokens_for_post_type($post_type);
+            $target_fields = UCG_Tokens::get_target_fields_for_post_type($post_type);
+
+            wp_send_json_success(
+                array(
+                    'tokens' => $tokens,
+                    'target_fields' => $target_fields,
+                )
+            );
+        }
+
+        public function ajax_search_runs() {
+            $this->guard_ajax();
+
+            $query = sanitize_text_field($this->get_request_string($_POST, 'q', ''));
+            $limit = max(5, min(100, $this->get_request_int($_POST, 'limit', 25)));
+            $runs = UCG_DB::search_runs_for_select($query, $limit);
+
+            $options = array();
+            foreach ($runs as $run) {
+                if (!is_array($run)) {
+                    continue;
+                }
+
+                $run_id = isset($run['id']) ? (int) $run['id'] : 0;
+                if ($run_id <= 0) {
+                    continue;
+                }
+
+                $post_type = isset($run['post_type']) ? (string) $run['post_type'] : '';
+                $status = isset($run['status']) ? (string) $run['status'] : '';
+
+                $options[] = array(
+                    'value' => (string) $run_id,
+                    'label' => '#' . $run_id . ' — ' . $post_type . ' (' . $this->status_label($status) . ')',
+                );
+            }
+
+            wp_send_json_success(
+                array(
+                    'options' => $options,
+                )
+            );
+        }
+
+        public function ajax_save_api_key() {
+            $this->guard_ajax();
+
+            $api_key = sanitize_text_field($this->get_request_string($_POST, 'api_key', ''));
+            if ($api_key === '') {
+                UCG_Settings::save_api_key('', 0);
+                delete_transient('ucg_balance_cache');
+                delete_transient('ucg_text_length_options_cache_v2');
+                delete_transient('ucg_prompt_library_cache_v1');
+                wp_send_json_error(array('message' => __('Введите API ключ.', 'unicontent-ai-generator')));
+            }
+
+            UCG_Settings::save_api_key($api_key, 0);
+            delete_transient('ucg_text_length_options_cache_v2');
+            delete_transient('ucg_prompt_library_cache_v1');
+
+            $client = new UCG_Api_Client($api_key);
+            $result = $client->test_connection();
+            if (is_wp_error($result)) {
+                delete_transient('ucg_balance_cache');
+                wp_send_json_success(
+                    array(
+                        'verified' => false,
+                        'message' => sprintf(__('Ключ сохранен, но проверка не пройдена: %s', 'unicontent-ai-generator'), $result->get_error_message()),
+                        'masked_key' => UCG_Settings::get_masked_api_key(),
+                    )
+                );
+            }
+
+            UCG_Settings::save_api_key($api_key, 1);
+            delete_transient('ucg_text_length_options_cache_v2');
+            delete_transient('ucg_prompt_library_cache_v1');
+
+            $ttl = (int) UCG_Settings::get_option('credits_cache_ttl', 60);
+            $ttl = max(10, min(600, $ttl));
+            set_transient('ucg_balance_cache', $result, $ttl);
+
+            wp_send_json_success(
+                array(
+                    'verified' => true,
+                    'message' => __('Ключ сохранен и проверен.', 'unicontent-ai-generator'),
+                    'masked_key' => UCG_Settings::get_masked_api_key(),
+                    'credits' => isset($result['credits']) ? (float) $result['credits'] : 0,
+                )
+            );
+        }
+
+        public function ajax_delete_api_key() {
+            $this->guard_ajax();
+
+            UCG_Settings::save_api_key('', 0);
+            delete_transient('ucg_balance_cache');
+            delete_transient('ucg_text_length_options_cache_v2');
+            delete_transient('ucg_prompt_library_cache_v1');
+
+            wp_send_json_success(
+                array(
+                    'message' => __('Ключ удален.', 'unicontent-ai-generator'),
+                )
+            );
+        }
+
+        public function ajax_save_batch_size() {
+            $this->guard_ajax();
+
+            $batch_size = $this->get_request_int($_POST, 'batch_size', (int) UCG_Settings::get_option('batch_size', 20));
+            $batch_size = max(1, min(100, $batch_size));
+            $generation_mode = sanitize_key($this->get_request_string($_POST, 'generation_mode', (string) UCG_Settings::get_option('generation_mode', 'review')));
+            if (!in_array($generation_mode, array('review', 'publish'), true)) {
+                $generation_mode = 'review';
+            }
+
+            UCG_Settings::update(
+                array(
+                    'batch_size' => $batch_size,
+                    'generation_mode' => $generation_mode,
+                )
+            );
+
+            $mode_label = $generation_mode === 'publish'
+                ? __('Публиковать сразу', 'unicontent-ai-generator')
+                : __('Сначала проверка', 'unicontent-ai-generator');
+
+            wp_send_json_success(
+                array(
+                    'batch_size' => $batch_size,
+                    'generation_mode' => $generation_mode,
+                    'message' => sprintf(__('Сохранено. За шаг: до %d записей. Режим: %s.', 'unicontent-ai-generator'), $batch_size, $mode_label),
+                )
+            );
+        }
+
+        public function ajax_run_status() {
+            $this->guard_ajax();
+
+            $run_id = $this->get_request_int($_POST, 'run_id', 0);
+            if ($run_id <= 0) {
+                wp_send_json_error(array('message' => __('Некорректный ID запуска.', 'unicontent-ai-generator')));
+            }
+
+            $run = UCG_DB::get_run($run_id);
+            if (!$run) {
+                wp_send_json_error(array('message' => __('Запуск не найден.', 'unicontent-ai-generator')));
+            }
+
+            $total = max(0, (int) $run['total_items']);
+            $processed = max(0, (int) $run['processed_items']);
+            $success = max(0, (int) $run['success_items']);
+            $failed = max(0, (int) $run['failed_items']);
+            $queued = max(0, $total - $processed);
+            $progress = $total > 0 ? min(100, (int) floor(($processed / $total) * 100)) : 0;
+            $status = sanitize_key((string) $run['status']);
+            $is_finished = in_array($status, array('completed', 'failed'), true);
+
+            $log_rows = UCG_DB::get_run_items_log($run_id, 20);
+            $logs = array();
+            foreach ($log_rows as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $logs[] = array(
+                    'id' => isset($row['id']) ? (int) $row['id'] : 0,
+                    'post_id' => isset($row['post_id']) ? (int) $row['post_id'] : 0,
+                    'status' => isset($row['status']) ? sanitize_key((string) $row['status']) : '',
+                    'status_label' => $this->status_label(isset($row['status']) ? (string) $row['status'] : ''),
+                    'error_message' => $this->truncate_log_message(isset($row['error_message']) ? (string) $row['error_message'] : ''),
+                    'attempts' => isset($row['attempts']) ? (int) $row['attempts'] : 0,
+                    'updated_at' => isset($row['updated_at']) ? (string) $row['updated_at'] : '',
+                    'generated_at' => isset($row['generated_at']) ? (string) $row['generated_at'] : '',
+                );
+            }
+
+            wp_send_json_success(
+                array(
+                    'run' => array(
+                        'id' => $run_id,
+                        'status' => $status,
+                        'status_label' => $this->status_label($status),
+                        'progress' => $progress,
+                        'total_items' => $total,
+                        'processed_items' => $processed,
+                        'success_items' => $success,
+                        'failed_items' => $failed,
+                        'queued_items' => $queued,
+                    ),
+                    'logs' => $logs,
+                    'is_finished' => $is_finished,
+                    'review_url' => admin_url('admin.php?page=ucg-review&run_id=' . $run_id),
+                    'runs_url' => admin_url('admin.php?page=ucg-runs'),
+                )
+            );
+        }
+
+        public function ajax_wizard_schema() {
+            $this->guard_ajax();
+
+            if (!UCG_Settings::has_valid_api_key()) {
+                wp_send_json_error(array('message' => __('Сначала добавьте и проверьте API ключ.', 'unicontent-ai-generator')));
+            }
+
+            $post_type = sanitize_key($this->get_request_string($_POST, 'post_type', UCG_Tokens::get_default_post_type()));
+            if ($post_type === '' || !post_type_exists($post_type)) {
+                $post_type = UCG_Tokens::get_default_post_type();
+            }
+
+            $force_refresh_lengths = !empty($_POST['force_refresh_lengths']);
+            wp_send_json_success($this->build_wizard_schema($post_type, $force_refresh_lengths));
+        }
+
+        public function ajax_wizard_preview() {
+            $this->guard_ajax();
+
+            if (!UCG_Settings::has_valid_api_key()) {
+                wp_send_json_error(array('message' => __('Сначала добавьте и проверьте API ключ.', 'unicontent-ai-generator')));
+            }
+
+            $post_type = sanitize_key($this->get_request_string($_POST, 'post_type', ''));
+            if ($post_type === '' || !post_type_exists($post_type)) {
+                wp_send_json_error(array('message' => __('Некорректный post type.', 'unicontent-ai-generator')));
+            }
+
+            $filters = $this->normalize_filters_from_request($this->get_request_string($_POST, 'filters', '[]'), $post_type);
+            $page = max(1, $this->get_request_int($_POST, 'page', 1));
+            $per_page = $this->get_request_int($_POST, 'per_page', 20);
+            $per_page = max(1, min(100, $per_page));
+
+            $total = $this->query_filtered_post_ids_count($post_type, $filters);
+            $offset = ($page - 1) * $per_page;
+            $ids = $this->query_filtered_post_ids($post_type, $filters, $per_page, $offset);
+            $posts = $this->map_posts_for_preview($ids);
+
+            $total_pages = max(1, (int) ceil($total / $per_page));
+            if ($page > $total_pages) {
+                $page = $total_pages;
+            }
+
+            wp_send_json_success(
+                array(
+                    'total' => (int) $total,
+                    'page' => (int) $page,
+                    'per_page' => (int) $per_page,
+                    'total_pages' => (int) $total_pages,
+                    'items' => $posts,
+                    'filters' => $filters,
+                )
+            );
+        }
+
+        public function ajax_wizard_load_template() {
+            $this->guard_ajax();
+
+            if (!UCG_Settings::has_valid_api_key()) {
+                wp_send_json_error(array('message' => __('Сначала добавьте и проверьте API ключ.', 'unicontent-ai-generator')));
+            }
+
+            $template_id = $this->get_request_int($_POST, 'template_id', 0);
+            if ($template_id <= 0) {
+                wp_send_json_error(array('message' => __('Некорректный ID шаблона.', 'unicontent-ai-generator')));
+            }
+
+            $template = UCG_DB::get_template($template_id);
+            if (!$template) {
+                wp_send_json_error(array('message' => __('Шаблон не найден.', 'unicontent-ai-generator')));
+            }
+
+            $tokens = UCG_Tokens::get_prompt_tokens_for_post_type((string) $template['post_type']);
+
+            wp_send_json_success(
+                array(
+                    'template' => array(
+                        'id' => (int) $template['id'],
+                        'name' => (string) $template['name'],
+                        'post_type' => (string) $template['post_type'],
+                        'body' => (string) $template['body'],
+                        'length_option_id' => isset($template['length_option_id']) ? (int) $template['length_option_id'] : 0,
+                        'vary_length' => !empty($template['vary_length']),
+                        'is_default' => !empty($template['is_default']),
+                    ),
+                    'tokens' => $tokens,
+                )
+            );
+        }
+
+        public function ajax_wizard_create_run() {
+            $this->guard_ajax();
+
+            if (!UCG_Settings::has_valid_api_key()) {
+                wp_send_json_error(array('message' => __('Сначала добавьте и проверьте API ключ.', 'unicontent-ai-generator')));
+            }
+
+            $post_type = sanitize_key($this->get_request_string($_POST, 'post_type', ''));
+            $target_field = sanitize_text_field($this->get_request_string($_POST, 'target_field', ''));
+            $template_id = $this->get_request_int($_POST, 'template_id', 0);
+            $template_name = sanitize_text_field($this->get_request_string($_POST, 'template_name', ''));
+            $template_body = sanitize_textarea_field($this->get_request_string($_POST, 'template_body', ''));
+            $selection_mode = sanitize_key($this->get_request_string($_POST, 'selection_mode', 'selected'));
+            $save_template = !empty($_POST['save_template']) ? 1 : 0;
+            $vary_length = !empty($_POST['vary_length']) ? 1 : 0;
+
+            if ($post_type === '' || !post_type_exists($post_type)) {
+                wp_send_json_error(array('message' => __('Некорректный post type.', 'unicontent-ai-generator')));
+            }
+
+            $schema = $this->build_wizard_schema($post_type, false);
+            $length_option_id = $this->resolve_length_option_id(
+                $this->get_request_int($_POST, 'length_option_id', 0),
+                isset($schema['text_length_options']) && is_array($schema['text_length_options']) ? $schema['text_length_options'] : null
+            );
+            $allowed_target_fields = array();
+            if (!empty($schema['target_fields']) && is_array($schema['target_fields'])) {
+                foreach ($schema['target_fields'] as $field_item) {
+                    if (!empty($field_item['value'])) {
+                        $allowed_target_fields[(string) $field_item['value']] = true;
+                    }
+                }
+            }
+
+            if (!isset($allowed_target_fields[$target_field])) {
+                wp_send_json_error(array('message' => __('Выберите корректное целевое поле.', 'unicontent-ai-generator')));
+            }
+
+            $active_template_id = $template_id;
+            if ($template_id > 0) {
+                $template = UCG_DB::get_template($template_id);
+                if (!$template) {
+                    wp_send_json_error(array('message' => __('Шаблон не найден.', 'unicontent-ai-generator')));
+                }
+
+                if ($template_body === '') {
+                    $template_body = (string) $template['body'];
+                }
+                if (trim($template_body) === '') {
+                    wp_send_json_error(array('message' => __('Текст шаблона не может быть пустым.', 'unicontent-ai-generator')));
+                }
+
+                if ($length_option_id <= 0 && !empty($template['length_option_id'])) {
+                    $length_option_id = $this->resolve_length_option_id(
+                        (int) $template['length_option_id'],
+                        isset($schema['text_length_options']) && is_array($schema['text_length_options']) ? $schema['text_length_options'] : null
+                    );
+                }
+
+                if ($save_template) {
+                    UCG_DB::update_template(
+                        $template_id,
+                        (string) $template['name'],
+                        $post_type,
+                        $template_body,
+                        !empty($template['is_default']) ? 1 : 0,
+                        $length_option_id,
+                        $vary_length
+                    );
+                }
+            } else {
+                if (trim($template_body) === '') {
+                    wp_send_json_error(array('message' => __('Текст шаблона не может быть пустым.', 'unicontent-ai-generator')));
+                }
+
+                if ($save_template) {
+                    if ($template_name === '') {
+                        wp_send_json_error(array('message' => __('Введите название шаблона.', 'unicontent-ai-generator')));
+                    }
+
+                    $created_template_id = UCG_DB::create_template($template_name, $post_type, $template_body, 0, $length_option_id, $vary_length);
+                    if ($created_template_id <= 0) {
+                        wp_send_json_error(array('message' => __('Не удалось сохранить новый шаблон.', 'unicontent-ai-generator')));
+                    }
+                    $active_template_id = $created_template_id;
+                }
+            }
+
+            if ($length_option_id <= 0) {
+                wp_send_json_error(array('message' => __('Выберите диапазон длины текста.', 'unicontent-ai-generator')));
+            }
+
+            $filters = $this->normalize_filters_from_request($this->get_request_string($_POST, 'filters', '[]'), $post_type);
+            $post_ids = array();
+
+            if ($selection_mode === 'filtered') {
+                $post_ids = $this->query_filtered_post_ids($post_type, $filters, 50000, 0);
+            } else {
+                $selected_ids = $this->parse_ids_json($this->get_request_string($_POST, 'selected_ids', '[]'));
+                $post_ids = $this->validate_post_ids_for_type($selected_ids, $post_type);
+            }
+
+            if (empty($post_ids)) {
+                wp_send_json_error(array('message' => __('Не выбраны записи для генерации.', 'unicontent-ai-generator')));
+            }
+
+            $options = array(
+                'scope' => $selection_mode === 'filtered' ? 'filtered' : 'selected',
+                'filters' => $filters,
+                'template_body' => $template_body,
+                'length_option_id' => $length_option_id,
+                'vary_length' => $vary_length,
+            );
+
+            $run_id = UCG_DB::create_run($post_type, $target_field, $active_template_id, get_current_user_id(), $options);
+            if ($run_id <= 0) {
+                wp_send_json_error(array('message' => __('Не удалось создать запуск.', 'unicontent-ai-generator')));
+            }
+
+            $added_items = UCG_DB::add_run_items($run_id, $post_ids);
+            if ($added_items <= 0) {
+                UCG_DB::update_run(
+                    $run_id,
+                    array(
+                        'status' => 'failed',
+                        'error_message' => __('Не удалось добавить записи в очередь.', 'unicontent-ai-generator'),
+                        'finished_at' => current_time('mysql', true),
+                    )
+                );
+                wp_send_json_error(array('message' => __('Не удалось добавить записи в очередь.', 'unicontent-ai-generator')));
+            }
+
+            UCG_Generator::kickstart_queue(0);
+
+            wp_send_json_success(
+                array(
+                    'run_id' => $run_id,
+                    'queued' => $added_items,
+                    'message' => sprintf(__('Запуск #%d создан. В очереди: %d.', 'unicontent-ai-generator'), $run_id, $added_items),
+                    'progress_url' => admin_url('admin.php?page=ucg-run-progress&run_id=' . $run_id),
+                )
+            );
+        }
+
+        public function render_admin_notice() {
+            $notice = sanitize_text_field($this->get_request_string($_GET, self::NOTICE_QUERY, ''));
+            if ($notice === '') {
+                return;
+            }
+
+            $type = sanitize_key($this->get_request_string($_GET, self::NOTICE_TYPE_QUERY, 'success'));
+            $class = 'notice notice-success is-dismissible';
+            if ($type === 'error') {
+                $class = 'notice notice-error is-dismissible';
+            } elseif ($type === 'warning') {
+                $class = 'notice notice-warning is-dismissible';
+            }
+
+            echo '<div class="' . esc_attr($class) . '"><p>' . esc_html($notice) . '</p></div>';
+        }
+
+        public function status_label($status) {
+            $status = sanitize_key((string) $status);
+            $map = array(
+                'queued' => __('В очереди', 'unicontent-ai-generator'),
+                'running' => __('В работе', 'unicontent-ai-generator'),
+                'completed' => __('Завершен', 'unicontent-ai-generator'),
+                'failed' => __('Ошибка', 'unicontent-ai-generator'),
+                'generated' => __('Сгенерировано', 'unicontent-ai-generator'),
+                'approved' => __('Одобрено', 'unicontent-ai-generator'),
+                'rejected' => __('Отклонено', 'unicontent-ai-generator'),
+                'processing' => __('Обрабатывается', 'unicontent-ai-generator'),
+                'publish' => __('Опубликовано', 'unicontent-ai-generator'),
+                'draft' => __('Черновик', 'unicontent-ai-generator'),
+                'private' => __('Приватный', 'unicontent-ai-generator'),
+                'pending' => __('На утверждении', 'unicontent-ai-generator'),
+            );
+
+            if (isset($map[$status])) {
+                return $map[$status];
+            }
+
+            return (string) $status;
+        }
+
+        protected function build_wizard_schema($post_type, $force_refresh_lengths = false) {
+            $post_type = sanitize_key((string) $post_type);
+            if ($post_type === '' || !post_type_exists($post_type)) {
+                $post_type = UCG_Tokens::get_default_post_type();
+            }
+
+            $target_fields = UCG_Tokens::get_target_fields_for_post_type($post_type);
+            $templates = UCG_DB::get_templates($post_type);
+            if (empty($templates)) {
+                $templates = UCG_DB::get_templates();
+            }
+            $tokens = UCG_Tokens::get_prompt_tokens_for_post_type($post_type);
+            $filter_fields = $this->get_filter_fields_for_post_type($post_type);
+            $text_length_data = $this->get_text_length_options(!empty($force_refresh_lengths));
+            $text_length_options = isset($text_length_data['options']) && is_array($text_length_data['options']) ? $text_length_data['options'] : array();
+
+            return array(
+                'post_type' => $post_type,
+                'target_fields' => $target_fields,
+                'templates' => array_map(
+                    function ($row) {
+                        return array(
+                            'id' => (int) $row['id'],
+                            'name' => (string) $row['name'],
+                            'post_type' => isset($row['post_type']) ? (string) $row['post_type'] : '',
+                            'is_default' => !empty($row['is_default']),
+                            'length_option_id' => isset($row['length_option_id']) ? (int) $row['length_option_id'] : 0,
+                            'vary_length' => !empty($row['vary_length']),
+                        );
+                    },
+                    is_array($templates) ? $templates : array()
+                ),
+                'tokens' => $tokens,
+                'text_length_options' => $text_length_options,
+                'default_length_option_id' => isset($text_length_data['default_option_id']) ? (int) $text_length_data['default_option_id'] : 0,
+                'vary_length_hint' => isset($text_length_data['hint']) ? (string) $text_length_data['hint'] : '',
+                'filter_fields' => $filter_fields,
+                'filter_operators' => array(
+                    array('value' => 'is_empty', 'label' => __('пусто', 'unicontent-ai-generator')),
+                    array('value' => 'not_empty', 'label' => __('не пусто', 'unicontent-ai-generator')),
+                    array('value' => 'contains', 'label' => __('содержит', 'unicontent-ai-generator')),
+                    array('value' => 'not_contains', 'label' => __('не содержит', 'unicontent-ai-generator')),
+                    array('value' => 'equals', 'label' => __('равно', 'unicontent-ai-generator')),
+                    array('value' => 'not_equals', 'label' => __('не равно', 'unicontent-ai-generator')),
+                    array('value' => 'gt', 'label' => '>'),
+                    array('value' => 'gte', 'label' => '>='),
+                    array('value' => 'lt', 'label' => '<'),
+                    array('value' => 'lte', 'label' => '<='),
+                ),
+            );
+        }
+
+        protected function get_filter_fields_for_post_type($post_type) {
+            $post_type = sanitize_key((string) $post_type);
+            $fields = array(
+                array('value' => 'post_id', 'label' => __('ID записи', 'unicontent-ai-generator')),
+                array('value' => 'post_status', 'label' => __('Статус записи', 'unicontent-ai-generator')),
+                array('value' => 'post_title', 'label' => __('Заголовок (post_title)', 'unicontent-ai-generator')),
+                array('value' => 'post_content', 'label' => __('Содержимое (post_content)', 'unicontent-ai-generator')),
+                array('value' => 'post_excerpt', 'label' => __('Краткое описание (post_excerpt)', 'unicontent-ai-generator')),
+            );
+
+            $target_fields = UCG_Tokens::get_target_fields_for_post_type($post_type);
+            foreach ($target_fields as $field_item) {
+                if (empty($field_item['value']) || strpos((string) $field_item['value'], 'post:') === 0) {
+                    continue;
+                }
+                $fields[] = array(
+                    'value' => (string) $field_item['value'],
+                    'label' => __('Поле: ', 'unicontent-ai-generator') . (string) $field_item['label'],
+                );
+            }
+
+            $seen = array();
+            $result = array();
+            foreach ($fields as $field) {
+                $value = isset($field['value']) ? (string) $field['value'] : '';
+                if ($value === '' || isset($seen[$value])) {
+                    continue;
+                }
+                $seen[$value] = true;
+                $result[] = array(
+                    'value' => $value,
+                    'label' => isset($field['label']) ? (string) $field['label'] : $value,
+                );
+            }
+            return $result;
+        }
+
+        protected function get_header_balance_snapshot() {
+            $cached = get_transient('ucg_balance_cache');
+            if (is_array($cached) && array_key_exists('credits', $cached)) {
+                return (float) $cached['credits'];
+            }
+
+            if (!UCG_Settings::has_valid_api_key()) {
+                return null;
+            }
+
+            $client = new UCG_Api_Client();
+            $result = $client->get_balance();
+            if (is_wp_error($result)) {
+                return null;
+            }
+
+            $ttl = (int) UCG_Settings::get_option('credits_cache_ttl', 60);
+            $ttl = max(10, min(600, $ttl));
+            set_transient('ucg_balance_cache', $result, $ttl);
+            return isset($result['credits']) ? (float) $result['credits'] : 0.0;
+        }
+
+        protected function normalize_filters_from_request($json, $post_type) {
+            $post_type = sanitize_key((string) $post_type);
+            $json = (string) $json;
+            $decoded = json_decode($json, true);
+            if (!is_array($decoded)) {
+                $decoded = array();
+            }
+
+            $allowed_fields = array();
+            foreach ($this->get_filter_fields_for_post_type($post_type) as $field_item) {
+                if (!empty($field_item['value'])) {
+                    $allowed_fields[(string) $field_item['value']] = true;
+                }
+            }
+
+            $allowed_operators = array('is_empty', 'not_empty', 'contains', 'not_contains', 'equals', 'not_equals', 'gt', 'gte', 'lt', 'lte');
+            $result = array();
+
+            foreach ($decoded as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+
+                $field = isset($row['field']) ? sanitize_text_field((string) $row['field']) : '';
+                $operator = isset($row['operator']) ? sanitize_key((string) $row['operator']) : '';
+                $value = isset($row['value']) ? sanitize_text_field((string) $row['value']) : '';
+
+                if ($field === '' || !isset($allowed_fields[$field])) {
+                    continue;
+                }
+                if (!in_array($operator, $allowed_operators, true)) {
+                    continue;
+                }
+
+                if (!in_array($operator, array('is_empty', 'not_empty'), true) && $value === '') {
+                    continue;
+                }
+
+                $result[] = array(
+                    'field' => $field,
+                    'operator' => $operator,
+                    'value' => $value,
+                );
+            }
+
+            return $result;
+        }
+
+        protected function query_filtered_post_ids_count($post_type, $filters) {
+            global $wpdb;
+
+            $post_type = sanitize_key((string) $post_type);
+            if ($post_type === '' || !post_type_exists($post_type)) {
+                return 0;
+            }
+
+            $build = $this->build_filters_sql($post_type, $filters);
+            $posts_table = $wpdb->posts;
+
+            $sql = "SELECT COUNT(*) FROM {$posts_table} p WHERE " . implode(' AND ', $build['where']);
+            $params = $build['params'];
+            $prepared = $this->prepare_query($sql, $params);
+            if ($prepared === '') {
+                return 0;
+            }
+
+            return (int) $wpdb->get_var($prepared);
+        }
+
+        protected function query_filtered_post_ids($post_type, $filters, $limit = 20, $offset = 0) {
+            global $wpdb;
+
+            $post_type = sanitize_key((string) $post_type);
+            if ($post_type === '' || !post_type_exists($post_type)) {
+                return array();
+            }
+
+            $limit = max(1, min(100000, (int) $limit));
+            $offset = max(0, (int) $offset);
+
+            $build = $this->build_filters_sql($post_type, $filters);
+            $posts_table = $wpdb->posts;
+            $sql = "SELECT p.ID
+                    FROM {$posts_table} p
+                    WHERE " . implode(' AND ', $build['where']) . "
+                    ORDER BY p.ID DESC
+                    LIMIT %d OFFSET %d";
+
+            $params = $build['params'];
+            $params[] = $limit;
+            $params[] = $offset;
+            $prepared = $this->prepare_query($sql, $params);
+            if ($prepared === '') {
+                return array();
+            }
+
+            $ids = $wpdb->get_col($prepared);
+            if (!is_array($ids)) {
+                return array();
+            }
+
+            $ids = array_map('intval', $ids);
+            $ids = array_values(array_unique(array_filter($ids)));
+            return $ids;
+        }
+
+        protected function build_filters_sql($post_type, $filters) {
+            global $wpdb;
+
+            $post_type = sanitize_key((string) $post_type);
+            $where = array(
+                'p.post_type = %s',
+                "p.post_status IN ('publish','draft','private','pending')",
+            );
+            $params = array($post_type);
+            $meta_table = $wpdb->postmeta;
+
+            if (!is_array($filters)) {
+                $filters = array();
+            }
+
+            foreach ($filters as $filter) {
+                if (!is_array($filter) || empty($filter['field']) || empty($filter['operator'])) {
+                    continue;
+                }
+
+                $field = (string) $filter['field'];
+                $operator = sanitize_key((string) $filter['operator']);
+                $value = isset($filter['value']) ? (string) $filter['value'] : '';
+
+                $is_meta_field = strpos($field, 'meta:') === 0 || strpos($field, 'acf:') === 0;
+                if ($is_meta_field) {
+                    $meta_key = strpos($field, 'meta:') === 0 ? substr($field, 5) : substr($field, 4);
+                    $meta_key = sanitize_text_field((string) $meta_key);
+                    if ($meta_key === '') {
+                        continue;
+                    }
+
+                    if ($operator === 'is_empty') {
+                        $where[] = "NOT EXISTS (
+                            SELECT 1 FROM {$meta_table} pm
+                            WHERE pm.post_id = p.ID
+                              AND pm.meta_key = %s
+                              AND CHAR_LENGTH(TRIM(COALESCE(pm.meta_value, ''))) > 0
+                        )";
+                        $params[] = $meta_key;
+                        continue;
+                    }
+
+                    if ($operator === 'not_empty') {
+                        $where[] = "EXISTS (
+                            SELECT 1 FROM {$meta_table} pm
+                            WHERE pm.post_id = p.ID
+                              AND pm.meta_key = %s
+                              AND CHAR_LENGTH(TRIM(COALESCE(pm.meta_value, ''))) > 0
+                        )";
+                        $params[] = $meta_key;
+                        continue;
+                    }
+
+                    if ($operator === 'contains') {
+                        $where[] = "EXISTS (
+                            SELECT 1 FROM {$meta_table} pm
+                            WHERE pm.post_id = p.ID
+                              AND pm.meta_key = %s
+                              AND pm.meta_value LIKE %s
+                        )";
+                        $params[] = $meta_key;
+                        $params[] = '%' . $wpdb->esc_like($value) . '%';
+                        continue;
+                    }
+
+                    if ($operator === 'not_contains') {
+                        $where[] = "NOT EXISTS (
+                            SELECT 1 FROM {$meta_table} pm
+                            WHERE pm.post_id = p.ID
+                              AND pm.meta_key = %s
+                              AND pm.meta_value LIKE %s
+                        )";
+                        $params[] = $meta_key;
+                        $params[] = '%' . $wpdb->esc_like($value) . '%';
+                        continue;
+                    }
+
+                    if ($operator === 'equals') {
+                        $where[] = "EXISTS (
+                            SELECT 1 FROM {$meta_table} pm
+                            WHERE pm.post_id = p.ID
+                              AND pm.meta_key = %s
+                              AND pm.meta_value = %s
+                        )";
+                        $params[] = $meta_key;
+                        $params[] = $value;
+                        continue;
+                    }
+
+                    if ($operator === 'not_equals') {
+                        $where[] = "NOT EXISTS (
+                            SELECT 1 FROM {$meta_table} pm
+                            WHERE pm.post_id = p.ID
+                              AND pm.meta_key = %s
+                              AND pm.meta_value = %s
+                        )";
+                        $params[] = $meta_key;
+                        $params[] = $value;
+                        continue;
+                    }
+                    continue;
+                }
+
+                if ($field === 'post_id') {
+                    $number = (int) $value;
+                    if ($operator === 'equals') {
+                        $where[] = 'p.ID = %d';
+                        $params[] = $number;
+                    } elseif ($operator === 'not_equals') {
+                        $where[] = 'p.ID <> %d';
+                        $params[] = $number;
+                    } elseif ($operator === 'gt') {
+                        $where[] = 'p.ID > %d';
+                        $params[] = $number;
+                    } elseif ($operator === 'gte') {
+                        $where[] = 'p.ID >= %d';
+                        $params[] = $number;
+                    } elseif ($operator === 'lt') {
+                        $where[] = 'p.ID < %d';
+                        $params[] = $number;
+                    } elseif ($operator === 'lte') {
+                        $where[] = 'p.ID <= %d';
+                        $params[] = $number;
+                    }
+                    continue;
+                }
+
+                if ($field === 'post_status') {
+                    if ($operator === 'equals') {
+                        $where[] = 'p.post_status = %s';
+                        $params[] = sanitize_key($value);
+                    } elseif ($operator === 'not_equals') {
+                        $where[] = 'p.post_status <> %s';
+                        $params[] = sanitize_key($value);
+                    }
+                    continue;
+                }
+
+                $column = '';
+                if ($field === 'post_title') {
+                    $column = 'p.post_title';
+                } elseif ($field === 'post_content') {
+                    $column = 'p.post_content';
+                } elseif ($field === 'post_excerpt') {
+                    $column = 'p.post_excerpt';
+                }
+
+                if ($column === '') {
+                    continue;
+                }
+
+                if ($operator === 'is_empty') {
+                    $where[] = "CHAR_LENGTH(TRIM(COALESCE({$column}, ''))) = 0";
+                    continue;
+                }
+                if ($operator === 'not_empty') {
+                    $where[] = "CHAR_LENGTH(TRIM(COALESCE({$column}, ''))) > 0";
+                    continue;
+                }
+                if ($operator === 'contains') {
+                    $where[] = "{$column} LIKE %s";
+                    $params[] = '%' . $wpdb->esc_like($value) . '%';
+                    continue;
+                }
+                if ($operator === 'not_contains') {
+                    $where[] = "({$column} IS NULL OR {$column} NOT LIKE %s)";
+                    $params[] = '%' . $wpdb->esc_like($value) . '%';
+                    continue;
+                }
+                if ($operator === 'equals') {
+                    $where[] = "{$column} = %s";
+                    $params[] = $value;
+                    continue;
+                }
+                if ($operator === 'not_equals') {
+                    $where[] = "({$column} IS NULL OR {$column} <> %s)";
+                    $params[] = $value;
+                }
+            }
+
+            return array(
+                'where' => $where,
+                'params' => $params,
+            );
+        }
+
+        protected function prepare_query($sql, $params) {
+            global $wpdb;
+            if (!is_string($sql) || $sql === '') {
+                return '';
+            }
+            if (!is_array($params) || empty($params)) {
+                return $sql;
+            }
+
+            return $wpdb->prepare($sql, $params);
+        }
+
+        protected function map_posts_for_preview($ids) {
+            $ids = is_array($ids) ? array_map('intval', $ids) : array();
+            $ids = array_values(array_filter(array_unique($ids)));
+            if (empty($ids)) {
+                return array();
+            }
+
+            $result = array();
+            foreach ($ids as $post_id) {
+                $post = get_post($post_id);
+                if (!$post instanceof WP_Post) {
+                    continue;
+                }
+                $result[] = array(
+                    'id' => (int) $post->ID,
+                    'title' => (string) $post->post_title,
+                    'status' => (string) $post->post_status,
+                    'status_label' => $this->status_label((string) $post->post_status),
+                    'date' => (string) $post->post_date,
+                );
+            }
+            return $result;
+        }
+
+        protected function parse_ids_json($json) {
+            $json = (string) $json;
+            $decoded = json_decode($json, true);
+            if (!is_array($decoded)) {
+                return array();
+            }
+            $ids = array_map('intval', $decoded);
+            $ids = array_values(array_filter(array_unique($ids)));
+            return $ids;
+        }
+
+        protected function validate_post_ids_for_type($ids, $post_type) {
+            global $wpdb;
+
+            $post_type = sanitize_key((string) $post_type);
+            $ids = is_array($ids) ? array_map('intval', $ids) : array();
+            $ids = array_values(array_filter(array_unique($ids)));
+            if ($post_type === '' || empty($ids)) {
+                return array();
+            }
+
+            $posts_table = $wpdb->posts;
+            $placeholders = implode(',', array_fill(0, count($ids), '%d'));
+            $sql = "SELECT ID FROM {$posts_table}
+                    WHERE post_type = %s
+                      AND post_status IN ('publish','draft','private','pending')
+                      AND ID IN ({$placeholders})";
+            $params = array_merge(array($post_type), $ids);
+            $prepared = $wpdb->prepare($sql, $params);
+            $valid_ids = $wpdb->get_col($prepared);
+            if (!is_array($valid_ids)) {
+                return array();
+            }
+            $valid_ids = array_map('intval', $valid_ids);
+            $valid_ids = array_values(array_filter(array_unique($valid_ids)));
+            return $valid_ids;
+        }
+
+        protected function collect_filtered_post_ids($post_type, $status_filter, $search, $max = 50000) {
+            $post_type = sanitize_key((string) $post_type);
+            $status_filter = $this->normalize_status_filter((string) $status_filter);
+            $max = max(1, min(100000, (int) $max));
+
+            $query_args = array(
+                'post_type' => $post_type,
+                'post_status' => $this->resolve_post_statuses($status_filter),
+                'posts_per_page' => $max,
+                'fields' => 'ids',
+                'orderby' => 'ID',
+                'order' => 'DESC',
+                'no_found_rows' => true,
+                'update_post_meta_cache' => false,
+                'update_post_term_cache' => false,
+                'suppress_filters' => true,
+            );
+
+            $search = trim((string) $search);
+            if ($search !== '') {
+                $query_args['s'] = $search;
+            }
+
+            $query = new WP_Query($query_args);
+            if (empty($query->posts) || !is_array($query->posts)) {
+                return array();
+            }
+
+            $ids = array_map('intval', $query->posts);
+            $ids = array_values(array_filter(array_unique($ids)));
+            return $ids;
+        }
+
+        protected function normalize_status_filter($status_filter) {
+            $status_filter = sanitize_key((string) $status_filter);
+            $allowed = array('all', 'publish', 'draft', 'private', 'pending');
+            if (!in_array($status_filter, $allowed, true)) {
+                return 'publish';
+            }
+            return $status_filter;
+        }
+
+        protected function resolve_post_statuses($status_filter) {
+            if ($status_filter === 'all') {
+                return array('publish', 'draft', 'private', 'pending');
+            }
+            return array($status_filter);
+        }
+
+        protected function get_text_length_options($force_refresh = false) {
+            static $in_memory_cache = null;
+
+            $fallback = array(
+                'options' => array(
+                    array('id' => 1, 'name' => __('Короткое', 'unicontent-ai-generator'), 'max_chars' => 500, 'credits_cost' => 1),
+                    array('id' => 2, 'name' => __('Стандартное', 'unicontent-ai-generator'), 'max_chars' => 1500, 'credits_cost' => 3),
+                    array('id' => 3, 'name' => __('Расширенное', 'unicontent-ai-generator'), 'max_chars' => 3000, 'credits_cost' => 6),
+                    array('id' => 4, 'name' => __('Большое', 'unicontent-ai-generator'), 'max_chars' => 5000, 'credits_cost' => 10),
+                ),
+                'default_option_id' => 2,
+                'hint' => __('Текст будет генерироваться с небольшим разбросом длины внутри выбранного диапазона, чтобы результаты выглядели естественнее.', 'unicontent-ai-generator'),
+            );
+
+            if (!$force_refresh && is_array($in_memory_cache)) {
+                return $in_memory_cache;
+            }
+
+            if (!UCG_Settings::has_valid_api_key()) {
+                $in_memory_cache = $fallback;
+                return $fallback;
+            }
+
+            $transient_key = 'ucg_text_length_options_cache_v2';
+            if (!$force_refresh) {
+                $cached = get_transient($transient_key);
+                if (is_array($cached) && !empty($cached['options']) && is_array($cached['options'])) {
+                    $in_memory_cache = $cached;
+                    return $cached;
+                }
+            }
+
+            $client = new UCG_Api_Client();
+            $response = $client->get_text_length_options();
+            if (is_wp_error($response)) {
+                $in_memory_cache = $fallback;
+                return $fallback;
+            }
+
+            $options = isset($response['options']) && is_array($response['options']) ? $response['options'] : array();
+            $normalized = array();
+            $default_option_id = isset($response['default_option_id']) ? (int) $response['default_option_id'] : 0;
+            foreach ($options as $option) {
+                if (!is_array($option)) {
+                    continue;
+                }
+                $id = isset($option['id']) ? (int) $option['id'] : 0;
+                $name = isset($option['name']) ? trim((string) $option['name']) : '';
+                $max_chars = isset($option['max_chars']) ? (int) $option['max_chars'] : 0;
+                $credits_cost = isset($option['credits_cost']) ? (float) $option['credits_cost'] : 0.0;
+
+                if ($id <= 0 || $name === '' || $max_chars <= 0 || $credits_cost <= 0) {
+                    continue;
+                }
+
+                $normalized[] = array(
+                    'id' => $id,
+                    'name' => $name,
+                    'max_chars' => $max_chars,
+                    'credits_cost' => $credits_cost,
+                );
+            }
+
+            if (empty($normalized)) {
+                $in_memory_cache = $fallback;
+                return $fallback;
+            }
+
+            if ($default_option_id <= 0) {
+                $default_option_id = (int) $normalized[0]['id'];
+            }
+
+            $result = array(
+                'options' => $normalized,
+                'default_option_id' => $default_option_id,
+                'hint' => isset($response['vary_length_hint']) && trim((string) $response['vary_length_hint']) !== ''
+                    ? (string) $response['vary_length_hint']
+                    : $fallback['hint'],
+            );
+            set_transient($transient_key, $result, 60);
+            $in_memory_cache = $result;
+            return $result;
+        }
+
+        protected function get_prompt_library($force_refresh = false, $query_args = array()) {
+            static $in_memory_cache = array();
+
+            $fallback = array(
+                'categories' => array(),
+                'types' => array(),
+                'prompts' => array(),
+            );
+
+            $query_args = is_array($query_args) ? $query_args : array();
+            $normalized_args = array();
+            if (!empty($query_args['category_slug'])) {
+                $normalized_args['category_slug'] = sanitize_key((string) $query_args['category_slug']);
+            }
+            if (!empty($query_args['type_slug'])) {
+                $normalized_args['type_slug'] = sanitize_key((string) $query_args['type_slug']);
+            }
+            if (!empty($query_args['search'])) {
+                $normalized_args['search'] = sanitize_text_field((string) $query_args['search']);
+            }
+            if (!empty($query_args['limit'])) {
+                $normalized_args['limit'] = max(1, min(1000, (int) $query_args['limit']));
+            }
+
+            $cache_key = md5(wp_json_encode($normalized_args));
+            if (!$force_refresh && isset($in_memory_cache[$cache_key]) && is_array($in_memory_cache[$cache_key])) {
+                $this->last_prompt_library_error = isset($in_memory_cache[$cache_key]['error']) ? (string) $in_memory_cache[$cache_key]['error'] : '';
+                return $in_memory_cache[$cache_key];
+            }
+
+            if (!UCG_Settings::has_valid_api_key()) {
+                $message = __('Сначала добавьте и проверьте API ключ.', 'unicontent-ai-generator');
+                $result = $fallback;
+                $result['error'] = $message;
+                $in_memory_cache[$cache_key] = $result;
+                $this->last_prompt_library_error = $message;
+                return $result;
+            }
+
+            $transient_key = 'ucg_prompt_library_cache_v1_' . $cache_key;
+            if (!$force_refresh) {
+                $cached = get_transient($transient_key);
+                if (is_array($cached)) {
+                    $in_memory_cache[$cache_key] = wp_parse_args($cached, $fallback);
+                    $this->last_prompt_library_error = isset($in_memory_cache[$cache_key]['error']) ? (string) $in_memory_cache[$cache_key]['error'] : '';
+                    return $in_memory_cache[$cache_key];
+                }
+            }
+
+            $client = new UCG_Api_Client();
+            $request_args = array('limit' => 1000);
+            if (!empty($normalized_args)) {
+                $request_args = array_merge($request_args, $normalized_args);
+            }
+            $response = $client->get_prompt_library($request_args);
+            if (is_wp_error($response)) {
+                $message = (string) $response->get_error_message();
+                $result = $fallback;
+                $result['error'] = $message;
+                $in_memory_cache[$cache_key] = $result;
+                $this->last_prompt_library_error = $message;
+                return $result;
+            }
+
+            $result = array(
+                'categories' => isset($response['categories']) && is_array($response['categories']) ? $response['categories'] : array(),
+                'types' => isset($response['types']) && is_array($response['types']) ? $response['types'] : array(),
+                'prompts' => isset($response['prompts']) && is_array($response['prompts']) ? $response['prompts'] : array(),
+                'error' => '',
+            );
+
+            set_transient($transient_key, $result, 60);
+            $in_memory_cache[$cache_key] = $result;
+            $this->last_prompt_library_error = '';
+            return $result;
+        }
+
+        protected function get_last_prompt_library_error() {
+            return (string) $this->last_prompt_library_error;
+        }
+
+        protected function get_ready_wordpress_prompts($force_refresh = false) {
+            $library = $this->get_prompt_library(
+                $force_refresh,
+                array(
+                    'category_slug' => 'wordpress',
+                    'limit' => 1000,
+                )
+            );
+            $prompts = isset($library['prompts']) && is_array($library['prompts']) ? $library['prompts'] : array();
+            if (empty($prompts)) {
+                return array();
+            }
+
+            $result = array();
+            foreach ($prompts as $prompt) {
+                if (!is_array($prompt)) {
+                    continue;
+                }
+
+                $category = isset($prompt['category']) && is_array($prompt['category']) ? $prompt['category'] : array();
+                $category_slug = isset($category['slug']) ? sanitize_key((string) $category['slug']) : '';
+                if ($category_slug !== 'wordpress') {
+                    continue;
+                }
+
+                $id = isset($prompt['id']) ? (int) $prompt['id'] : 0;
+                $name = isset($prompt['name']) ? trim((string) $prompt['name']) : '';
+                $slug = isset($prompt['slug']) ? sanitize_key((string) $prompt['slug']) : '';
+                $summary = isset($prompt['summary']) ? trim((string) $prompt['summary']) : '';
+                $body = isset($prompt['body']) ? (string) $prompt['body'] : '';
+
+                if ($id <= 0 || $name === '' || trim($body) === '') {
+                    continue;
+                }
+
+                $type = isset($prompt['type']) && is_array($prompt['type']) ? $prompt['type'] : array();
+                $type_id = isset($type['id']) ? (int) $type['id'] : 0;
+                $type_name = isset($type['name']) ? trim((string) $type['name']) : '';
+                $type_slug = isset($type['slug']) ? sanitize_key((string) $type['slug']) : '';
+
+                $result[] = array(
+                    'id' => $id,
+                    'name' => $name,
+                    'slug' => $slug,
+                    'summary' => $summary,
+                    'body' => $body,
+                    'category' => array(
+                        'id' => isset($category['id']) ? (int) $category['id'] : 0,
+                        'name' => isset($category['name']) ? (string) $category['name'] : '',
+                        'slug' => $category_slug,
+                    ),
+                    'type' => array(
+                        'id' => $type_id,
+                        'name' => $type_name,
+                        'slug' => $type_slug,
+                    ),
+                );
+            }
+
+            return $result;
+        }
+
+        protected function get_prompt_type_filters($prompts) {
+            $prompts = is_array($prompts) ? $prompts : array();
+            $result = array();
+            $seen = array();
+
+            foreach ($prompts as $prompt) {
+                if (!is_array($prompt)) {
+                    continue;
+                }
+
+                $type = isset($prompt['type']) && is_array($prompt['type']) ? $prompt['type'] : array();
+                $type_slug = isset($type['slug']) ? sanitize_key((string) $type['slug']) : '';
+                $type_name = isset($type['name']) ? trim((string) $type['name']) : '';
+                if ($type_slug === '' || $type_name === '' || isset($seen[$type_slug])) {
+                    continue;
+                }
+
+                $seen[$type_slug] = true;
+                $result[] = array(
+                    'slug' => $type_slug,
+                    'name' => $type_name,
+                );
+            }
+
+            usort(
+                $result,
+                function ($a, $b) {
+                    return strcmp((string) $a['name'], (string) $b['name']);
+                }
+            );
+
+            return $result;
+        }
+
+        protected function find_ready_prompt_by_id($prompt_id, $force_refresh = false) {
+            $prompt_id = (int) $prompt_id;
+            if ($prompt_id <= 0) {
+                return null;
+            }
+
+            $prompts = $this->get_ready_wordpress_prompts($force_refresh);
+            foreach ($prompts as $prompt) {
+                if (!is_array($prompt)) {
+                    continue;
+                }
+                if ((int) (isset($prompt['id']) ? $prompt['id'] : 0) === $prompt_id) {
+                    return $prompt;
+                }
+            }
+
+            return null;
+        }
+
+        protected function get_ready_template_installs() {
+            $raw = get_option(self::READY_TEMPLATE_INSTALLS_OPTION, array());
+            if (!is_array($raw)) {
+                return array();
+            }
+
+            $result = array();
+            foreach ($raw as $prompt_id => $item) {
+                $normalized_prompt_id = (int) $prompt_id;
+                if ($normalized_prompt_id <= 0 || !is_array($item)) {
+                    continue;
+                }
+
+                $template_id = isset($item['template_id']) ? (int) $item['template_id'] : 0;
+                if ($template_id <= 0) {
+                    continue;
+                }
+
+                $result[(string) $normalized_prompt_id] = array(
+                    'template_id' => $template_id,
+                    'post_type' => isset($item['post_type']) ? sanitize_key((string) $item['post_type']) : '',
+                    'prompt_slug' => isset($item['prompt_slug']) ? sanitize_key((string) $item['prompt_slug']) : '',
+                    'updated_at' => isset($item['updated_at']) ? (string) $item['updated_at'] : '',
+                );
+            }
+
+            return $result;
+        }
+
+        protected function save_ready_template_installs($installs) {
+            $installs = is_array($installs) ? $installs : array();
+            $normalized = array();
+
+            foreach ($installs as $prompt_id => $item) {
+                $normalized_prompt_id = (int) $prompt_id;
+                if ($normalized_prompt_id <= 0 || !is_array($item)) {
+                    continue;
+                }
+
+                $template_id = isset($item['template_id']) ? (int) $item['template_id'] : 0;
+                if ($template_id <= 0) {
+                    continue;
+                }
+
+                $normalized[(string) $normalized_prompt_id] = array(
+                    'template_id' => $template_id,
+                    'post_type' => isset($item['post_type']) ? sanitize_key((string) $item['post_type']) : '',
+                    'prompt_slug' => isset($item['prompt_slug']) ? sanitize_key((string) $item['prompt_slug']) : '',
+                    'updated_at' => isset($item['updated_at']) ? (string) $item['updated_at'] : '',
+                );
+            }
+
+            update_option(self::READY_TEMPLATE_INSTALLS_OPTION, $normalized, false);
+            return $normalized;
+        }
+
+        protected function get_ready_installed_templates_map() {
+            $installs = $this->get_ready_template_installs();
+            if (empty($installs)) {
+                return array();
+            }
+
+            $result = array();
+            $dirty = false;
+
+            foreach ($installs as $prompt_key => $item) {
+                $template_id = isset($item['template_id']) ? (int) $item['template_id'] : 0;
+                if ($template_id <= 0) {
+                    $dirty = true;
+                    continue;
+                }
+
+                $template = UCG_DB::get_template($template_id);
+                if (!$template) {
+                    unset($installs[$prompt_key]);
+                    $dirty = true;
+                    continue;
+                }
+
+                $result[$prompt_key] = array(
+                    'template_id' => $template_id,
+                    'name' => isset($template['name']) ? (string) $template['name'] : '',
+                    'post_type' => isset($template['post_type']) ? (string) $template['post_type'] : '',
+                );
+            }
+
+            if ($dirty) {
+                $this->save_ready_template_installs($installs);
+            }
+
+            return $result;
+        }
+
+        protected function resolve_length_option_id($candidate_id, $options = null) {
+            $candidate_id = (int) $candidate_id;
+            if (!is_array($options)) {
+                $data = $this->get_text_length_options();
+                $options = isset($data['options']) && is_array($data['options']) ? $data['options'] : array();
+            }
+
+            $first_id = 0;
+            foreach ($options as $option) {
+                if (!is_array($option)) {
+                    continue;
+                }
+                $id = isset($option['id']) ? (int) $option['id'] : 0;
+                if ($id <= 0) {
+                    continue;
+                }
+                if ($first_id <= 0) {
+                    $first_id = $id;
+                }
+                if ($candidate_id > 0 && $id === $candidate_id) {
+                    return $id;
+                }
+            }
+
+            if ($candidate_id > 0) {
+                return 0;
+            }
+            return $first_id;
+        }
+
+        protected function build_menu_counter_badge($count) {
+            $count = max(0, (int) $count);
+            if ($count <= 0) {
+                return '';
+            }
+
+            $safe_count = min(999, $count);
+            return ' <span class="awaiting-mod count-' . $safe_count . '"><span class="pending-count">' . $safe_count . '</span></span>';
+        }
+
+        protected function get_request_string($source, $key, $default = '') {
+            if (!is_array($source) || !array_key_exists($key, $source)) {
+                return (string) $default;
+            }
+
+            $value = wp_unslash($source[$key]);
+            if (is_array($value) || is_object($value)) {
+                return (string) $default;
+            }
+
+            return (string) $value;
+        }
+
+        protected function get_request_int($source, $key, $default = 0) {
+            $value = $this->get_request_string($source, $key, (string) $default);
+            return (int) $value;
+        }
+
+        protected function guard_admin_post($nonce_action) {
+            if (!current_user_can('manage_options')) {
+                wp_die(esc_html__('Доступ запрещен.', 'unicontent-ai-generator'));
+            }
+
+            check_admin_referer($nonce_action);
+        }
+
+        protected function guard_ajax() {
+            check_ajax_referer('ucg_admin_nonce', 'nonce');
+            if (!current_user_can('manage_options')) {
+                wp_send_json_error(array('message' => __('Доступ запрещен.', 'unicontent-ai-generator')));
+            }
+        }
+
+        protected function truncate_log_message($message, $max_length = 180) {
+            $message = trim((string) $message);
+            if ($message === '') {
+                return '';
+            }
+
+            $message = preg_replace('/\s+/u', ' ', $message);
+            if (!is_string($message)) {
+                return '';
+            }
+
+            $max_length = max(40, (int) $max_length);
+            if (function_exists('mb_strlen') && function_exists('mb_substr')) {
+                if (mb_strlen($message, 'UTF-8') <= $max_length) {
+                    return $message;
+                }
+                return rtrim(mb_substr($message, 0, $max_length - 1, 'UTF-8')) . '…';
+            }
+
+            if (strlen($message) <= $max_length) {
+                return $message;
+            }
+            return rtrim(substr($message, 0, $max_length - 1)) . '…';
+        }
+
+        protected function resolve_ready_templates_redirect_page($source) {
+            $page_slug = sanitize_key($this->get_request_string($source, 'redirect_page', 'ucg-ready-templates'));
+            if (!in_array($page_slug, array('ucg-ready-templates', 'ucg-templates'), true)) {
+                $page_slug = 'ucg-ready-templates';
+            }
+            return $page_slug;
+        }
+
+        protected function redirect_ready_templates_notice($page_slug, $message, $type = 'success', $post_type = '') {
+            $extra_args = array();
+            if ($page_slug === 'ucg-ready-templates') {
+                $post_type = sanitize_key((string) $post_type);
+                if ($post_type !== '' && post_type_exists($post_type)) {
+                    $extra_args['post_type'] = $post_type;
+                }
+            }
+            $this->redirect_with_notice($page_slug, $message, $type, $extra_args);
+        }
+
+        protected function redirect_with_notice($page_slug, $message, $type = 'success', $extra_args = array()) {
+            $query_args = array_merge(
+                array(
+                    'page' => $page_slug,
+                    self::NOTICE_QUERY => (string) $message,
+                    self::NOTICE_TYPE_QUERY => sanitize_key((string) $type),
+                ),
+                is_array($extra_args) ? $extra_args : array()
+            );
+            $url = add_query_arg($query_args, admin_url('admin.php'));
+            wp_safe_redirect($url);
+            exit;
+        }
+    }
+}
