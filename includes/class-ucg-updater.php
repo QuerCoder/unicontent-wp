@@ -90,7 +90,10 @@ if (!class_exists('UCG_Updater')) {
                 set_transient('ucg_update_info', $remote, HOUR_IN_SECONDS);
             }
 
-            if ($remote && version_compare($this->version, $remote->version, '<')) {
+            // Используем версию из заголовка плагина (WP читает её сам), а не константу
+            $installed_version = $transient->checked[ $this->plugin_slug ] ?? $this->version;
+
+            if ($remote && version_compare($installed_version, $remote->version, '<')) {
                 $transient->response[$this->plugin_slug] = (object)[
                     'slug'        => dirname($this->plugin_slug),
                     'plugin'      => $this->plugin_slug,
