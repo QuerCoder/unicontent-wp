@@ -80,6 +80,10 @@ if (!class_exists('UCG_Updater')) {
                 return $transient;
             }
 
+            if (isset($_GET['force-check'])) {
+                delete_transient('ucg_update_info');
+            }
+
             $remote = get_transient('ucg_update_info');
             if ($remote === false) {
                 $remote = $this->get_remote_info();
