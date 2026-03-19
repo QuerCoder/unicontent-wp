@@ -24,14 +24,16 @@ if (!class_exists('UCG_Plugin')) {
         }
 
         public function localize_plugin_meta(array $plugins): array {
-            $file = 'unicontent-ai-generator/unicontent-ai-generator.php';
-            if (!isset($plugins[$file])) {
+            $locale = get_locale();
+            if (strpos($locale, 'ru_') !== 0 && $locale !== 'ru') {
                 return $plugins;
             }
-            $locale = get_locale();
-            if (strpos($locale, 'ru_') === 0 || $locale === 'ru') {
-                $plugins[$file]['Name']        = 'UNICONTENT — AI генератор контента';
-                $plugins[$file]['Description'] = 'Генерирует описания товаров, SEO-теги и тексты для любых записей прямо в WordPress. Поддерживает WooCommerce, массовую обработку каталога и любые типы постов. Подключается за 1 минуту — введите API-ключ и готово.';
+            foreach ($plugins as $key => $plugin) {
+                if (strpos($key, 'unicontent-ai-generator') !== false) {
+                    $plugins[$key]['Name']        = 'UNICONTENT — AI генератор контента';
+                    $plugins[$key]['Description'] = 'Генерирует описания товаров, SEO-теги и тексты для любых записей прямо в WordPress. Поддерживает WooCommerce, массовую обработку каталога и любые типы постов. Подключается за 1 минуту — введите API-ключ и готово.';
+                    break;
+                }
             }
             return $plugins;
         }

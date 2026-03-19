@@ -140,10 +140,11 @@ if (!class_exists('UCG_Updater')) {
          */
         public function after_install($response, $hook_extra, $result) {
             global $wp_filesystem;
-            $plugin_folder = WP_PLUGIN_DIR . DIRECTORY_SEPARATOR . dirname($this->plugin_slug);
+            $plugin_folder = WP_PLUGIN_DIR . DIRECTORY_SEPARATOR . 'unicontent-ai-generator';
             $wp_filesystem->move($result['destination'], $plugin_folder);
             $result['destination'] = $plugin_folder;
-            activate_plugin($this->plugin_slug);
+            delete_transient('ucg_update_info');
+            activate_plugin('unicontent-ai-generator/unicontent-ai-generator.php');
             return $result;
         }
     }
