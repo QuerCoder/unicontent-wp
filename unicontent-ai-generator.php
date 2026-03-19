@@ -33,6 +33,7 @@ if (!defined('UCG_PLUGIN_URL')) {
     define('UCG_PLUGIN_URL', plugin_dir_url(__FILE__));
 }
 
+require_once UCG_PLUGIN_DIR . 'includes/class-ucg-updater.php';
 require_once UCG_PLUGIN_DIR . 'includes/class-ucg-settings.php';
 require_once UCG_PLUGIN_DIR . 'includes/class-ucg-i18n.php';
 require_once UCG_PLUGIN_DIR . 'includes/class-ucg-db.php';
@@ -70,3 +71,8 @@ if (class_exists('UCG_I18n')) {
     UCG_I18n::hooks();
 }
 ucg_run_plugin();
+
+// Автообновления через unicontent.net (fallback: GitHub)
+if (class_exists('UCG_Updater')) {
+    new UCG_Updater(UCG_PLUGIN_FILE, UCG_VERSION);
+}
