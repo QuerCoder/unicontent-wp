@@ -75,7 +75,7 @@ if (!class_exists('UCG_Updater')) {
         /**
          * Хук: проверить наличие обновления
          */
-        public function check_update(object $transient): object {
+        public function check_update($transient) {
             if (empty($transient->checked)) {
                 return $transient;
             }
@@ -102,7 +102,7 @@ if (!class_exists('UCG_Updater')) {
         /**
          * Хук: инфо о плагине в модальном окне WP
          */
-        public function plugin_info(mixed $res, string $action, object $args): mixed {
+        public function plugin_info($res, $action, $args) {
             if ($action !== 'plugin_information') {
                 return $res;
             }
@@ -132,7 +132,7 @@ if (!class_exists('UCG_Updater')) {
         /**
          * Хук: переименовать папку после установки
          */
-        public function after_install(bool $response, array $hook_extra, array $result): array {
+        public function after_install($response, $hook_extra, $result) {
             global $wp_filesystem;
             $plugin_folder = WP_PLUGIN_DIR . DIRECTORY_SEPARATOR . dirname($this->plugin_slug);
             $wp_filesystem->move($result['destination'], $plugin_folder);
