@@ -30,8 +30,8 @@ if (!class_exists('UCG_Plugin')) {
             }
             $locale = get_locale();
             if (strpos($locale, 'ru_') === 0 || $locale === 'ru') {
-                $plugins[$file]['Name']        = 'UniContent AI — Генератор контента';
-                $plugins[$file]['Description'] = 'Генерирует описания товаров, SEO-метатеги и тексты для WordPress и WooCommerce. Массовая обработка каталога.';
+                $plugins[$file]['Name']        = 'UNICONTENT — AI генератор контента';
+                $plugins[$file]['Description'] = 'Генерирует описания товаров, SEO-теги и тексты для любых записей прямо в WordPress. Поддерживает WooCommerce, массовую обработку каталога и любые типы постов. Подключается за 1 минуту — введите API-ключ и готово.';
             }
             return $plugins;
         }

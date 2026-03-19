@@ -98,6 +98,8 @@ if (!class_exists('UCG_Updater')) {
                     'url'         => $remote->details_url ?? 'https://unicontent.net',
                     'package'     => $remote->download_url,
                 ];
+            } else {
+                unset($transient->response[$this->plugin_slug]);
             }
 
             return $transient;
