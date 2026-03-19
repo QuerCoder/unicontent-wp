@@ -13,13 +13,14 @@ git push origin main
 # Создаём тег
 git tag "v$VERSION" 2>/dev/null && git push origin "v$VERSION" || echo "Тег уже существует"
 
-# Собираем ZIP
+# Собираем ZIP с правильной структурой (папка unicontent-ai-generator внутри)
 ZIP_PATH="/tmp/unicontent-ai-generator-$VERSION.zip"
-zip -r "$ZIP_PATH" . \
-  --exclude "*.git*" \
-  --exclude "deploy.command" \
-  --exclude ".DS_Store" \
-  > /dev/null
+rm -f "$ZIP_PATH"
+rm -rf "/tmp/unicontent-ai-generator"
+cp -r . "/tmp/unicontent-ai-generator"
+rm -rf "/tmp/unicontent-ai-generator/.git" "/tmp/unicontent-ai-generator/deploy.command" "/tmp/unicontent-ai-generator/.DS_Store"
+(cd /tmp && zip -r "$ZIP_PATH" "unicontent-ai-generator" --exclude "*.DS_Store" > /dev/null)
+rm -rf "/tmp/unicontent-ai-generator"
 
 # Создаём релиз на GitHub
 gh release create "v$VERSION" \
