@@ -208,6 +208,7 @@ if (!class_exists('UCG_Api_Client')) {
             $body = array(
                 'prompt' => $prompt,
                 'max_tokens' => max(1, min(4000, (int) $max_tokens)),
+                'model' => 'auto',
             );
 
             $system_prompt = trim((string) $system_prompt);
