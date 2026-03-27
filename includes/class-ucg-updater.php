@@ -2,8 +2,8 @@
 if (!defined('ABSPATH')) exit;
 
 /**
- * Auto-updater: проверяет обновления через unicontent.net
- * Fallback на GitHub если сервер недоступен.
+ * Auto-updater: проверяет обновления через GitHub Releases.
+ * Fallback на unicontent.net если GitHub недоступен.
  */
 if (!class_exists('UCG_Updater')) {
     class UCG_Updater {
@@ -24,12 +24,13 @@ if (!class_exists('UCG_Updater')) {
             add_filter('upgrader_post_install', [$this, 'after_install'], 10, 3);
         }
 
-        /**
-         * Получить инфо о последней версии (сначала с нашего сервера, потом GitHub)
-         */
-        private function get_remote_info(): ?object {
-            // Пробуем наш сервер
-            $response = wp_remote_get($this->version_url, [
+        private function get_remote_info_from_server($force_refresh = false): ?object {
+            $url = $this->version_url;
+            if ($force_refresh) {
+                $url .= (strpos($url, '?') === false ? '?' : '&') . 'force=1';
+            }
+
+            $response = wp_remote_get($url, [
                 'timeout' => 10,
                 'headers' => ['Accept' => 'application/json'],
             ]);
@@ -42,10 +43,16 @@ if (!class_exists('UCG_Updater')) {
                 }
             }
 
-            // Fallback: GitHub API
+            return null;
+        }
+
+        private function get_remote_info_from_github(): ?object {
             $response = wp_remote_get($this->github_api, [
                 'timeout' => 10,
-                'headers' => ['Accept' => 'application/vnd.github+json'],
+                'headers' => [
+                    'Accept' => 'application/vnd.github+json',
+                    'User-Agent' => 'UNICONTENT-WP-Updater',
+                ],
             ]);
 
             if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
@@ -73,6 +80,18 @@ if (!class_exists('UCG_Updater')) {
         }
 
         /**
+         * Получить инфо о последней версии (GitHub в приоритете).
+         */
+        private function get_remote_info($force_refresh = false): ?object {
+            $github = $this->get_remote_info_from_github();
+            if ($github && !empty($github->version) && !empty($github->download_url)) {
+                return $github;
+            }
+
+            return $this->get_remote_info_from_server($force_refresh);
+        }
+
+        /**
          * Хук: проверить наличие обновления
          */
         public function check_update($transient) {
@@ -80,13 +99,14 @@ if (!class_exists('UCG_Updater')) {
                 return $transient;
             }
 
-            if (isset($_GET['force-check'])) {
+            $force_refresh = isset($_GET['force-check']);
+            if ($force_refresh) {
                 delete_transient('ucg_update_info');
             }
 
             $remote = get_transient('ucg_update_info');
             if ($remote === false) {
-                $remote = $this->get_remote_info();
+                $remote = $this->get_remote_info($force_refresh);
                 set_transient('ucg_update_info', $remote, HOUR_IN_SECONDS);
             }
 
