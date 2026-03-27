@@ -854,6 +854,8 @@ jQuery(function ($) {
         const state = {
             step: 1,
             schema: initialSchema,
+            scenario: (initialSchema && initialSchema.scenario) ? String(initialSchema.scenario) : 'field_update',
+            defaultModel: (initialSchema && initialSchema.default_model) ? String(initialSchema.default_model) : 'auto',
             page: 1,
             perPage: 20,
             totalPages: 1,
@@ -864,6 +866,8 @@ jQuery(function ($) {
             activeRunId: 0,
         };
 
+        const $scenarioCards = $('#ucg-wizard-scenario-picker');
+        const $scenarioInputs = $('input[name="ucg-wizard-scenario"]');
         const $postType = $('#ucg-wizard-post-type');
         const $targetField = $('#ucg-wizard-target-field');
         const $templateSelect = $('#ucg-wizard-template');
@@ -871,6 +875,9 @@ jQuery(function ($) {
         const $templateNameWrap = $('#ucg-template-name-wrap');
         const $saveTemplateLabel = $('#ucg-save-template-label');
         const $lengthOption = $('#ucg-wizard-length-option');
+        const $modelSelect = $('#ucg-wizard-model');
+        const $modelHint = $('#ucg-wizard-model-hint');
+        const $unitHint = $('#ucg-wizard-unit-hint');
         const $varyLength = $('#ucg-wizard-vary-length');
         const $varyLengthHint = $('#ucg-wizard-vary-length-hint');
         const $templateBody = $('#ucg-wizard-template-body');
@@ -890,6 +897,21 @@ jQuery(function ($) {
         const $runReviewLink = $('#ucg-run-review-link');
         const $selectionMode = $('input[name="ucg-selection-mode"]');
         const $saveTemplateChanges = $('#ucg-save-template-changes');
+
+        function setScenarioCardState() {
+            if (!$scenarioCards.length) {
+                return;
+            }
+            $scenarioCards.find('.ucg-scenario-card').removeClass('is-selected');
+            $scenarioInputs.filter(':checked').closest('.ucg-scenario-card').addClass('is-selected');
+        }
+
+        function getScenario() {
+            const selected = String($scenarioInputs.filter(':checked').val() || state.scenario || 'field_update');
+            state.scenario = selected || 'field_update';
+            setScenarioCardState();
+            return state.scenario;
+        }
 
         function setRunStatus(message, isError) {
             if (!$runResult.length) {
@@ -1254,6 +1276,111 @@ jQuery(function ($) {
             }
         }
 
+        function estimateCreditsByLength(modelItem, lengthOptionId) {
+            if (!modelItem || typeof modelItem !== 'object') {
+                return 0;
+            }
+            const map = modelItem.estimated_credits_by_length && typeof modelItem.estimated_credits_by_length === 'object'
+                ? modelItem.estimated_credits_by_length
+                : {};
+
+            const key = String(Number(lengthOptionId || 0));
+            if (Object.prototype.hasOwnProperty.call(map, key)) {
+                return Number(map[key] || 0);
+            }
+
+            const keys = Object.keys(map);
+            if (!keys.length) {
+                return 0;
+            }
+            const first = keys[0];
+            return Number(map[first] || 0);
+        }
+
+        function activeModelItem() {
+            const selectedModelId = String($modelSelect.val() || state.defaultModel || 'auto');
+            const models = Array.isArray(state.schema.generation_models) ? state.schema.generation_models : [];
+            for (let i = 0; i < models.length; i += 1) {
+                const item = models[i];
+                if (!item || typeof item !== 'object') {
+                    continue;
+                }
+                if (String(item.id || '') === selectedModelId) {
+                    return item;
+                }
+            }
+            return null;
+        }
+
+        function updateModelHint() {
+            if (!$modelHint.length) {
+                return;
+            }
+
+            const lengthOptionId = Number($lengthOption.val() || 0);
+            const model = activeModelItem();
+            const credits = estimateCreditsByLength(model, lengthOptionId);
+            const modelName = model && model.name ? String(model.name) : jsT('По умолчанию');
+            const provider = model && model.provider ? String(model.provider) : '';
+            const resolved = model && model.resolved_model ? String(model.resolved_model) : '';
+            let message = jsT('Оценка: ') + '~' + formatCreditsValue(credits, 2) + jsT(' кр/ед.');
+            message += ' • ' + modelName;
+            if (provider) {
+                message += ' (' + provider + ')';
+            }
+            if (resolved) {
+                message += ' • ' + resolved;
+            }
+            $modelHint.text(message);
+
+            const unitLabel = state.schema && state.schema.generation_unit_label
+                ? String(state.schema.generation_unit_label)
+                : jsT('1 единица');
+            if ($unitHint.length) {
+                $unitHint.text(jsT('Единица расчёта: ') + unitLabel);
+            }
+        }
+
+        function renderGenerationModels() {
+            const models = Array.isArray(state.schema.generation_models) ? state.schema.generation_models : [];
+            const lengthOptionId = Number($lengthOption.val() || 0);
+            const currentModel = String($modelSelect.val() || state.defaultModel || 'auto');
+            let html = '';
+            let selectedExists = false;
+            let defaultModel = String(state.schema.default_model || state.defaultModel || 'auto');
+            if (!defaultModel) {
+                defaultModel = 'auto';
+            }
+            state.defaultModel = defaultModel;
+
+            if (!models.length) {
+                html = '<option value="auto">' + escapeHtml(jsT('По умолчанию')) + '</option>';
+            } else {
+                models.forEach(function (item) {
+                    if (!item || typeof item !== 'object') {
+                        return;
+                    }
+                    const id = item.id ? String(item.id) : '';
+                    const name = item.name ? String(item.name) : id;
+                    if (!id || !name) {
+                        return;
+                    }
+                    const credits = estimateCreditsByLength(item, lengthOptionId);
+                    const label = name + ' — ~' + formatCreditsValue(credits, 2) + ' ' + jsT('кр/ед.');
+                    html += '<option value="' + escapeHtml(id) + '">' + escapeHtml(label) + '</option>';
+                    if (id === currentModel) {
+                        selectedExists = true;
+                    }
+                });
+            }
+
+            $modelSelect.html(html);
+            const nextModel = selectedExists ? currentModel : defaultModel;
+            setEnhancedSelectValue($modelSelect, nextModel);
+            initEnhancedSelects($modelSelect);
+            updateModelHint();
+        }
+
         function renderWizardTokens() {
             renderTokenButtons($tokens, Array.isArray(state.schema.tokens) ? state.schema.tokens : []);
         }
@@ -1460,6 +1587,7 @@ jQuery(function ($) {
 
         function previewPosts(page, $button) {
             const postType = String($postType.val() || '');
+            const scenario = getScenario();
             if (!postType) {
                 setRunStatus(jsT('Выберите тип записей.'), true);
                 return;
@@ -1473,6 +1601,7 @@ jQuery(function ($) {
             $.post(ucgAdmin.ajaxUrl, {
                 action: 'ucg_wizard_preview',
                 nonce: ucgAdmin.nonce,
+                scenario: scenario,
                 post_type: postType,
                 filters: JSON.stringify(filters),
                 page: targetPage,
@@ -1505,11 +1634,6 @@ jQuery(function ($) {
             updateTemplateMode();
             if (!id) {
                 $templateBody.val('');
-                const defaultLengthOptionId = Number(state.schema.default_length_option_id || 0);
-                if (defaultLengthOptionId > 0) {
-                    setEnhancedSelectValue($lengthOption, String(defaultLengthOptionId));
-                }
-                $varyLength.prop('checked', false);
                 return;
             }
 
@@ -1527,11 +1651,6 @@ jQuery(function ($) {
                 const data = response.data || {};
                 const template = data.template || {};
                 $templateBody.val(String(template.body || ''));
-                const templateLengthOptionId = Number(template.length_option_id || 0);
-                if (templateLengthOptionId > 0) {
-                    setEnhancedSelectValue($lengthOption, String(templateLengthOptionId));
-                }
-                $varyLength.prop('checked', !!template.vary_length);
                 renderTokenButtons($tokens, Array.isArray(data.tokens) ? data.tokens : []);
             }).fail(function () {
                 setRunStatus(jsT('AJAX ошибка при загрузке шаблона.'), true);
@@ -1539,10 +1658,12 @@ jQuery(function ($) {
         }
 
         function refreshSchema(postType, done, $button, forceRefreshLengths) {
+            const scenario = getScenario();
             setButtonLoading($button, true);
             $.post(ucgAdmin.ajaxUrl, {
                 action: 'ucg_wizard_schema',
                 nonce: ucgAdmin.nonce,
+                scenario: scenario,
                 post_type: postType,
                 force_refresh_lengths: forceRefreshLengths ? 1 : 0
             }).done(function (response) {
@@ -1553,8 +1674,20 @@ jQuery(function ($) {
                 }
 
                 state.schema = response.data || {};
+                if (state.schema && state.schema.scenario) {
+                    state.scenario = String(state.schema.scenario);
+                }
+                if (state.schema && state.schema.default_model) {
+                    state.defaultModel = String(state.schema.default_model);
+                }
+                if ($scenarioInputs.length && state.scenario) {
+                    $scenarioInputs.prop('checked', false);
+                    $scenarioInputs.filter('[value="' + state.scenario + '"]').prop('checked', true);
+                    setScenarioCardState();
+                }
                 renderTargetFields();
                 renderTextLengthOptions();
+                renderGenerationModels();
                 renderTemplates();
                 renderWizardTokens();
                 clearFilters();
@@ -1572,6 +1705,7 @@ jQuery(function ($) {
         }
 
         function startRun($button) {
+            const scenario = getScenario();
             const postType = String($postType.val() || '');
             const targetField = String($targetField.val() || '');
             const templateId = Number($templateSelect.val() || 0);
@@ -1580,6 +1714,7 @@ jQuery(function ($) {
             const mode = getSelectionMode();
             const filters = normalizeFilters();
             const lengthOptionId = Number($lengthOption.val() || 0);
+            const model = String($modelSelect.val() || state.defaultModel || 'auto');
             const varyLength = $varyLength.is(':checked') ? 1 : 0;
 
             if (!postType) {
@@ -1622,8 +1757,10 @@ jQuery(function ($) {
             $.post(ucgAdmin.ajaxUrl, {
                 action: 'ucg_wizard_create_run',
                 nonce: ucgAdmin.nonce,
+                scenario: scenario,
                 post_type: postType,
                 target_field: targetField,
+                model: model,
                 template_id: templateId,
                 template_name: templateName,
                 template_body: templateBody,
@@ -1663,8 +1800,13 @@ jQuery(function ($) {
 
         function bindEvents() {
             $('#ucg-step-1-next').on('click', function () {
+                const scenario = getScenario();
                 const postType = String($postType.val() || '');
                 const targetField = String($targetField.val() || '');
+                if (!scenario) {
+                    setRunStatus(jsT('Выберите сценарий генерации.'), true);
+                    return;
+                }
                 if (!postType) {
                     setRunStatus(jsT('Выберите тип записей.'), true);
                     return;
@@ -1719,6 +1861,28 @@ jQuery(function ($) {
                     updatePagination();
                     setRunStatus('', false);
                 }, $btn, false);
+            });
+
+            $scenarioInputs.on('change', function () {
+                getScenario();
+                const postType = String($postType.val() || '');
+                const $btn = $('#ucg-step-1-next');
+                refreshSchema(postType, function () {
+                    state.page = 1;
+                    state.total = 0;
+                    state.totalPages = 1;
+                    $previewBody.html(jsT('<tr><td colspan="5">Загружаем записи...</td></tr>'));
+                    updatePagination();
+                    setRunStatus('', false);
+                }, $btn, false);
+            });
+
+            $lengthOption.on('change', function () {
+                renderGenerationModels();
+            });
+
+            $modelSelect.on('change', function () {
+                updateModelHint();
             });
 
             $templateSelect.on('change', function () {
@@ -1832,6 +1996,8 @@ jQuery(function ($) {
 
         renderTargetFields();
         renderTextLengthOptions();
+        setScenarioCardState();
+        renderGenerationModels();
         renderTemplates();
         renderWizardTokens();
         clearFilters();

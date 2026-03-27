@@ -260,6 +260,67 @@ body.ucg-review-modal-open {
     gap: 12px;
 }
 
+.ucg-scenario-picker {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.ucg-scenario-card {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--ucg-border);
+    border-radius: 14px;
+    min-height: 52px;
+    padding: 10px 12px;
+    background: #fffdf9;
+    cursor: pointer;
+    transition: border-color .16s ease, box-shadow .16s ease, background-color .16s ease;
+}
+
+.ucg-scenario-card input[type="radio"] {
+    margin: 0;
+}
+
+.ucg-scenario-card__icon {
+    font-size: 18px;
+    width: 18px;
+    height: 18px;
+    color: var(--ucg-text-secondary);
+}
+
+.ucg-scenario-card__label {
+    font-weight: 600;
+    color: var(--ucg-text-primary);
+}
+
+.ucg-scenario-card__meta {
+    font-size: 11px;
+    color: var(--ucg-text-muted);
+}
+
+.ucg-scenario-card.is-selected {
+    border-color: rgba(240, 106, 54, 0.62);
+    box-shadow: 0 0 0 3px rgba(240, 106, 54, 0.12);
+    background: #fff;
+}
+
+.ucg-scenario-card.is-disabled {
+    opacity: .62;
+    cursor: not-allowed;
+}
+
+.ucg-model-controls {
+    margin-top: 10px;
+}
+
+.ucg-model-unit-hint-wrap {
+    display: flex;
+    align-items: center;
+}
+
 .ucg-grid-2 {
     display: grid;
     grid-template-columns: minmax(260px, 1fr) auto;
@@ -1386,6 +1447,10 @@ body.ucg-review-modal-open {
 
 @media (max-width: 900px) {
     .ucg-cards {
+        grid-template-columns: 1fr;
+    }
+
+    .ucg-scenario-picker {
         grid-template-columns: 1fr;
     }
 

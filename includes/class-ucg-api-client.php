@@ -33,8 +33,14 @@ if (!class_exists('UCG_Api_Client')) {
             );
         }
 
-        public function get_text_length_options() {
-            $response = $this->request('GET', '/text-length-options');
+        public function get_text_length_options($model = 'auto') {
+            $model = trim((string) $model);
+            if ($model === '') {
+                $model = 'auto';
+            }
+
+            $path = '/text-length-options?model=' . rawurlencode($model);
+            $response = $this->request('GET', $path);
             if (is_wp_error($response)) {
                 return $response;
             }
@@ -68,6 +74,65 @@ if (!class_exists('UCG_Api_Client')) {
                 'options' => $result_options,
                 'default_option_id' => isset($response['default_option_id']) ? (int) $response['default_option_id'] : 0,
                 'vary_length_hint' => isset($response['vary_length_hint']) ? (string) $response['vary_length_hint'] : '',
+            );
+        }
+
+        public function get_generation_models($scenario = 'field_update') {
+            $scenario = sanitize_key((string) $scenario);
+            if ($scenario === '') {
+                $scenario = 'field_update';
+            }
+
+            $path = '/generation-models?scenario=' . rawurlencode($scenario);
+            $response = $this->request('GET', $path);
+            if (is_wp_error($response)) {
+                return $response;
+            }
+
+            $models = isset($response['models']) && is_array($response['models']) ? $response['models'] : array();
+            $normalized_models = array();
+
+            foreach ($models as $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+
+                $value = isset($item['id']) ? sanitize_key((string) $item['id']) : '';
+                $label = isset($item['name']) ? trim((string) $item['name']) : '';
+                if ($value === '' || $label === '') {
+                    continue;
+                }
+
+                $estimated = isset($item['estimated_credits_by_length']) && is_array($item['estimated_credits_by_length'])
+                    ? $item['estimated_credits_by_length']
+                    : array();
+                $normalized_estimated = array();
+                foreach ($estimated as $key => $credits) {
+                    $length_key = (string) $key;
+                    $normalized_estimated[$length_key] = max(0.0, (float) $credits);
+                }
+
+                $normalized_models[] = array(
+                    'id' => $value,
+                    'name' => $label,
+                    'provider' => isset($item['provider']) ? trim((string) $item['provider']) : '',
+                    'resolved_model' => isset($item['resolved_model']) ? trim((string) $item['resolved_model']) : '',
+                    'is_default' => !empty($item['is_default']),
+                    'estimated_credits_by_length' => $normalized_estimated,
+                    'multiplier' => isset($item['multiplier']) ? max(0.1, (float) $item['multiplier']) : 1.0,
+                );
+            }
+
+            $default_model = isset($response['default_model']) ? sanitize_key((string) $response['default_model']) : 'auto';
+            if ($default_model === '') {
+                $default_model = 'auto';
+            }
+
+            return array(
+                'scenario' => isset($response['scenario']) ? sanitize_key((string) $response['scenario']) : $scenario,
+                'unit_label' => isset($response['unit_label']) ? trim((string) $response['unit_label']) : __('1 единица', 'unicontent-ai-generator'),
+                'default_model' => $default_model,
+                'models' => $normalized_models,
             );
         }
 
@@ -199,16 +264,21 @@ if (!class_exists('UCG_Api_Client')) {
             );
         }
 
-        public function generate_text($prompt, $system_prompt = '', $max_tokens = 1500, $length_option_id = 0, $vary_length = false) {
+        public function generate_text($prompt, $system_prompt = '', $max_tokens = 1500, $length_option_id = 0, $vary_length = false, $model = 'auto') {
             $prompt = trim((string) $prompt);
             if ($prompt === '') {
                 return new WP_Error('ucg_empty_prompt', __('Пустой промпт.', 'unicontent-ai-generator'));
             }
 
+            $model = trim((string) $model);
+            if ($model === '') {
+                $model = 'auto';
+            }
+
             $body = array(
                 'prompt' => $prompt,
                 'max_tokens' => max(1, min(4000, (int) $max_tokens)),
-                'model' => 'auto',
+                'model' => $model,
             );
 
             $system_prompt = trim((string) $system_prompt);

@@ -1,12 +1,6 @@
 <div class="wrap ucg-wrap">
     <?php $this->render_admin_notice(); ?>
     <?php include UCG_PLUGIN_DIR . 'templates/partials/plugin-header.php'; ?>
-    <?php
-    $editing_length_option_id = $editing_template && isset($editing_template['length_option_id'])
-        ? (int) $editing_template['length_option_id']
-        : (int) $default_length_option_id;
-    $editing_vary_length = $editing_template ? !empty($editing_template['vary_length']) : false;
-    ?>
 
     <div class="ucg-page-head">
         <div class="ucg-page-head__meta">
@@ -49,39 +43,6 @@
                     <span>Текст шаблона</span>
                     <textarea name="body" id="ucg-template-body" rows="12" required><?php echo esc_textarea($editing_template ? (string) $editing_template['body'] : ''); ?></textarea>
                 </label>
-
-                <label class="ucg-field">
-                    <span>Длина текста</span>
-                    <select name="length_option_id" class="ucg-enhanced-select" data-search-enabled="false" required>
-                        <?php if (!empty($text_length_options) && is_array($text_length_options)) : ?>
-                            <?php foreach ($text_length_options as $length_option_item) : ?>
-                                <?php
-                                $length_option_item_id = isset($length_option_item['id']) ? (int) $length_option_item['id'] : 0;
-                                $length_option_item_name = isset($length_option_item['name']) ? (string) $length_option_item['name'] : '';
-                                $length_option_item_max_chars = isset($length_option_item['max_chars']) ? (int) $length_option_item['max_chars'] : 0;
-                                $length_option_item_credits = isset($length_option_item['credits_cost']) ? (float) $length_option_item['credits_cost'] : 0.0;
-                                $length_option_item_credits_label = rtrim(rtrim(number_format($length_option_item_credits, 2, '.', ''), '0'), '.');
-                                if ($length_option_item_id <= 0 || $length_option_item_name === '') {
-                                    continue;
-                                }
-                                ?>
-                                <option value="<?php echo (int) $length_option_item_id; ?>" <?php selected($editing_length_option_id, $length_option_item_id); ?>>
-                                    <?php echo esc_html($length_option_item_name . ' — до ' . number_format_i18n($length_option_item_max_chars) . ' символов / ' . $length_option_item_credits_label . ' кр.'); ?>
-                                </option>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </select>
-                </label>
-
-                <div class="ucg-vary-length-block">
-                    <label class="ucg-checkbox">
-                        <input type="checkbox" name="vary_length" value="1" <?php checked($editing_vary_length); ?>>
-                        <span>Варьировать длину текста</span>
-                    </label>
-                    <?php if (!empty($text_length_hint)) : ?>
-                        <p class="ucg-muted ucg-field-hint"><?php echo esc_html((string) $text_length_hint); ?></p>
-                    <?php endif; ?>
-                </div>
 
                 <label class="ucg-checkbox">
                     <input type="checkbox" name="is_default" value="1" <?php checked($editing_template && !empty($editing_template['is_default'])); ?>>

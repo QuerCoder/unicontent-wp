@@ -162,6 +162,7 @@ if (!class_exists('UCG_Generator')) {
             $attempts = isset($item['attempts']) ? (int) $item['attempts'] : 0;
             $length_option_id = 0;
             $vary_length = 0;
+            $model = 'auto';
 
             if ($item_id <= 0 || $post_id <= 0 || $run_id <= 0) {
                 return new WP_Error('ucg_invalid_queue_item', __('Некорректный элемент очереди.', 'unicontent-ai-generator'));
@@ -175,6 +176,10 @@ if (!class_exists('UCG_Generator')) {
                 if (is_array($options)) {
                     $length_option_id = isset($options['length_option_id']) ? (int) $options['length_option_id'] : 0;
                     $vary_length = !empty($options['vary_length']) ? 1 : 0;
+                    $model = isset($options['model']) ? sanitize_key((string) $options['model']) : 'auto';
+                    if ($model === '') {
+                        $model = 'auto';
+                    }
                 }
             }
 
@@ -218,7 +223,7 @@ if (!class_exists('UCG_Generator')) {
                 $generation_mode = 'review';
             }
 
-            $response = $api_client->generate_text($prompt, $system_prompt, $max_tokens, $length_option_id, $vary_length);
+            $response = $api_client->generate_text($prompt, $system_prompt, $max_tokens, $length_option_id, $vary_length, $model);
             if (is_wp_error($response)) {
                 $next_status = ($attempts + 1) >= 3 ? 'failed' : 'queued';
                 if ($this->is_fatal_api_error($response)) {

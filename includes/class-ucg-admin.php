@@ -9,6 +9,7 @@ if (!class_exists('UCG_Admin')) {
         const NOTICE_QUERY = 'ucg_notice';
         const NOTICE_TYPE_QUERY = 'ucg_notice_type';
         const READY_TEMPLATE_INSTALLS_OPTION = 'ucg_ready_template_installs_v1';
+        const DEFAULT_GENERATION_SCENARIO = 'field_update';
         protected $last_prompt_library_error = '';
 
         public function hooks() {
@@ -144,10 +145,6 @@ if (!class_exists('UCG_Admin')) {
 
             $templates = UCG_DB::get_templates();
             $tokens = UCG_Tokens::get_prompt_tokens_for_post_type($selected_post_type);
-            $text_length_data = $this->get_text_length_options();
-            $text_length_options = isset($text_length_data['options']) && is_array($text_length_data['options']) ? $text_length_data['options'] : array();
-            $text_length_hint = isset($text_length_data['hint']) ? (string) $text_length_data['hint'] : '';
-            $default_length_option_id = isset($text_length_data['default_option_id']) ? (int) $text_length_data['default_option_id'] : 0;
             $header_balance = $this->get_header_balance_snapshot();
 
             ob_start();
@@ -181,9 +178,12 @@ if (!class_exists('UCG_Admin')) {
             if ($post_type === '' || !post_type_exists($post_type)) {
                 $post_type = UCG_Tokens::get_default_post_type();
             }
+            $scenario = $this->normalize_generation_scenario(
+                $this->get_request_string($_GET, 'scenario', self::DEFAULT_GENERATION_SCENARIO)
+            );
 
             $api_ready = UCG_Settings::has_valid_api_key();
-            $wizard_schema = $this->build_wizard_schema($post_type, false);
+            $wizard_schema = $this->build_wizard_schema($post_type, false, $scenario);
             $target_fields = isset($wizard_schema['target_fields']) && is_array($wizard_schema['target_fields'])
                 ? $wizard_schema['target_fields']
                 : array();
@@ -211,6 +211,9 @@ if (!class_exists('UCG_Admin')) {
             if ($default_length_option_id <= 0 && !empty($text_length_options[0]['id'])) {
                 $default_length_option_id = (int) $text_length_options[0]['id'];
             }
+            $scenario_options = isset($wizard_schema['scenario_options']) && is_array($wizard_schema['scenario_options'])
+                ? $wizard_schema['scenario_options']
+                : $this->get_generation_scenario_options();
             $wizard_templates = isset($wizard_schema['templates']) && is_array($wizard_schema['templates']) ? $wizard_schema['templates'] : array();
             $wizard_default_template_id = 0;
             foreach ($wizard_templates as $wizard_template_item) {
@@ -281,25 +284,20 @@ if (!class_exists('UCG_Admin')) {
             $post_type = sanitize_key($this->get_request_string($_POST, 'post_type', ''));
             $body = sanitize_textarea_field($this->get_request_string($_POST, 'body', ''));
             $is_default = !empty($_POST['is_default']) ? 1 : 0;
-            $vary_length = !empty($_POST['vary_length']) ? 1 : 0;
-            $length_option_id = $this->resolve_length_option_id($this->get_request_int($_POST, 'length_option_id', 0));
 
             if ($name === '' || $post_type === '' || $body === '' || !post_type_exists($post_type)) {
                 $this->redirect_with_notice('ucg-templates', __('Заполните название, post type и текст шаблона.', 'unicontent-ai-generator'), 'error');
             }
-            if ($length_option_id <= 0) {
-                $this->redirect_with_notice('ucg-templates', __('Выберите диапазон длины текста.', 'unicontent-ai-generator'), 'error');
-            }
 
             if ($template_id > 0) {
-                $ok = UCG_DB::update_template($template_id, $name, $post_type, $body, $is_default, $length_option_id, $vary_length);
+                $ok = UCG_DB::update_template($template_id, $name, $post_type, $body, $is_default, 0, 0);
                 if (!$ok) {
                     $this->redirect_with_notice('ucg-templates', __('Не удалось обновить шаблон.', 'unicontent-ai-generator'), 'error');
                 }
                 $this->redirect_with_notice('ucg-templates', __('Шаблон обновлен.', 'unicontent-ai-generator'));
             }
 
-            $created_id = UCG_DB::create_template($name, $post_type, $body, $is_default, $length_option_id, $vary_length);
+            $created_id = UCG_DB::create_template($name, $post_type, $body, $is_default, 0, 0);
             if ($created_id <= 0) {
                 $this->redirect_with_notice('ucg-templates', __('Не удалось создать шаблон.', 'unicontent-ai-generator'), 'error');
             }
@@ -352,13 +350,6 @@ if (!class_exists('UCG_Admin')) {
                 $this->redirect_ready_templates_notice($redirect_page, __('Не удалось установить шаблон: пустое имя или текст.', 'unicontent-ai-generator'), 'error', $post_type);
             }
 
-            $text_length_data = $this->get_text_length_options();
-            $length_options = isset($text_length_data['options']) && is_array($text_length_data['options']) ? $text_length_data['options'] : array();
-            $default_length_option_id = $this->resolve_length_option_id(0, $length_options);
-            if ($default_length_option_id <= 0) {
-                $this->redirect_ready_templates_notice($redirect_page, __('Выберите диапазон длины текста перед установкой.', 'unicontent-ai-generator'), 'error', $post_type);
-            }
-
             $installs = $this->get_ready_template_installs();
             $prompt_key = (string) $prompt_id;
             $installed_template_id = isset($installs[$prompt_key]['template_id']) ? (int) $installs[$prompt_key]['template_id'] : 0;
@@ -367,20 +358,14 @@ if (!class_exists('UCG_Admin')) {
             if ($installed_template_id > 0) {
                 $existing_template = UCG_DB::get_template($installed_template_id);
                 if ($existing_template) {
-                    $existing_length_option_id = isset($existing_template['length_option_id']) ? (int) $existing_template['length_option_id'] : 0;
-                    $resolved_existing_length_option_id = $this->resolve_length_option_id($existing_length_option_id, $length_options);
-                    $next_length_option_id = $resolved_existing_length_option_id > 0
-                        ? $resolved_existing_length_option_id
-                        : $default_length_option_id;
-
                     $updated = UCG_DB::update_template(
                         $installed_template_id,
                         $name,
                         $post_type,
                         $body,
                         !empty($existing_template['is_default']) ? 1 : 0,
-                        $next_length_option_id,
-                        !empty($existing_template['vary_length']) ? 1 : 0
+                        0,
+                        0
                     );
                     if ($updated) {
                         $template_id = $installed_template_id;
@@ -389,7 +374,7 @@ if (!class_exists('UCG_Admin')) {
             }
 
             if ($template_id <= 0) {
-                $template_id = UCG_DB::create_template($name, $post_type, $body, 0, $default_length_option_id, 0);
+                $template_id = UCG_DB::create_template($name, $post_type, $body, 0, 0, 0);
                 if ($template_id <= 0) {
                     $this->redirect_ready_templates_notice($redirect_page, __('Не удалось установить готовый шаблон.', 'unicontent-ai-generator'), 'error', $post_type);
                 }
@@ -717,12 +702,14 @@ if (!class_exists('UCG_Admin')) {
                 delete_transient('ucg_balance_cache');
                 delete_transient('ucg_text_length_options_cache_v2');
                 delete_transient('ucg_prompt_library_cache_v1');
+                $this->clear_generation_model_caches();
                 wp_send_json_error(array('message' => __('Введите API ключ.', 'unicontent-ai-generator')));
             }
 
             UCG_Settings::save_api_key($api_key, 0);
             delete_transient('ucg_text_length_options_cache_v2');
             delete_transient('ucg_prompt_library_cache_v1');
+            $this->clear_generation_model_caches();
 
             $client = new UCG_Api_Client($api_key);
             $result = $client->test_connection();
@@ -740,6 +727,7 @@ if (!class_exists('UCG_Admin')) {
             UCG_Settings::save_api_key($api_key, 1);
             delete_transient('ucg_text_length_options_cache_v2');
             delete_transient('ucg_prompt_library_cache_v1');
+            $this->clear_generation_model_caches();
 
             $ttl = (int) UCG_Settings::get_option('credits_cache_ttl', 60);
             $ttl = max(10, min(600, $ttl));
@@ -762,6 +750,7 @@ if (!class_exists('UCG_Admin')) {
             delete_transient('ucg_balance_cache');
             delete_transient('ucg_text_length_options_cache_v2');
             delete_transient('ucg_prompt_library_cache_v1');
+            $this->clear_generation_model_caches();
 
             wp_send_json_success(
                 array(
@@ -872,9 +861,12 @@ if (!class_exists('UCG_Admin')) {
             if ($post_type === '' || !post_type_exists($post_type)) {
                 $post_type = UCG_Tokens::get_default_post_type();
             }
+            $scenario = $this->normalize_generation_scenario(
+                $this->get_request_string($_POST, 'scenario', self::DEFAULT_GENERATION_SCENARIO)
+            );
 
             $force_refresh_lengths = !empty($_POST['force_refresh_lengths']);
-            wp_send_json_success($this->build_wizard_schema($post_type, $force_refresh_lengths));
+            wp_send_json_success($this->build_wizard_schema($post_type, $force_refresh_lengths, $scenario));
         }
 
         public function ajax_wizard_preview() {
@@ -888,6 +880,9 @@ if (!class_exists('UCG_Admin')) {
             if ($post_type === '' || !post_type_exists($post_type)) {
                 wp_send_json_error(array('message' => __('Некорректный post type.', 'unicontent-ai-generator')));
             }
+            $scenario = $this->normalize_generation_scenario(
+                $this->get_request_string($_POST, 'scenario', self::DEFAULT_GENERATION_SCENARIO)
+            );
 
             $filters = $this->normalize_filters_from_request($this->get_request_string($_POST, 'filters', '[]'), $post_type);
             $page = max(1, $this->get_request_int($_POST, 'page', 1));
@@ -912,6 +907,7 @@ if (!class_exists('UCG_Admin')) {
                     'total_pages' => (int) $total_pages,
                     'items' => $posts,
                     'filters' => $filters,
+                    'scenario' => $scenario,
                 )
             );
         }
@@ -942,8 +938,6 @@ if (!class_exists('UCG_Admin')) {
                         'name' => (string) $template['name'],
                         'post_type' => (string) $template['post_type'],
                         'body' => (string) $template['body'],
-                        'length_option_id' => isset($template['length_option_id']) ? (int) $template['length_option_id'] : 0,
-                        'vary_length' => !empty($template['vary_length']),
                         'is_default' => !empty($template['is_default']),
                     ),
                     'tokens' => $tokens,
@@ -959,19 +953,42 @@ if (!class_exists('UCG_Admin')) {
             }
 
             $post_type = sanitize_key($this->get_request_string($_POST, 'post_type', ''));
+            $scenario = $this->normalize_generation_scenario(
+                $this->get_request_string($_POST, 'scenario', self::DEFAULT_GENERATION_SCENARIO)
+            );
             $target_field = sanitize_text_field($this->get_request_string($_POST, 'target_field', ''));
             $template_id = $this->get_request_int($_POST, 'template_id', 0);
             $template_name = sanitize_text_field($this->get_request_string($_POST, 'template_name', ''));
             $template_body = sanitize_textarea_field($this->get_request_string($_POST, 'template_body', ''));
             $selection_mode = sanitize_key($this->get_request_string($_POST, 'selection_mode', 'selected'));
+            $model = sanitize_key($this->get_request_string($_POST, 'model', 'auto'));
+            if ($model === '') {
+                $model = 'auto';
+            }
             $save_template = !empty($_POST['save_template']) ? 1 : 0;
             $vary_length = !empty($_POST['vary_length']) ? 1 : 0;
 
             if ($post_type === '' || !post_type_exists($post_type)) {
                 wp_send_json_error(array('message' => __('Некорректный post type.', 'unicontent-ai-generator')));
             }
+            if (!$this->is_scenario_available($scenario)) {
+                wp_send_json_error(array('message' => __('Выбранный сценарий пока недоступен.', 'unicontent-ai-generator')));
+            }
 
-            $schema = $this->build_wizard_schema($post_type, false);
+            $schema = $this->build_wizard_schema($post_type, false, $scenario);
+            $allowed_models = array('auto' => true);
+            if (!empty($schema['generation_models']) && is_array($schema['generation_models'])) {
+                foreach ($schema['generation_models'] as $model_item) {
+                    if (!is_array($model_item) || empty($model_item['id'])) {
+                        continue;
+                    }
+                    $allowed_models[(string) $model_item['id']] = true;
+                }
+            }
+            if (!isset($allowed_models[$model])) {
+                wp_send_json_error(array('message' => __('Выберите корректную модель.', 'unicontent-ai-generator')));
+            }
+
             $length_option_id = $this->resolve_length_option_id(
                 $this->get_request_int($_POST, 'length_option_id', 0),
                 isset($schema['text_length_options']) && is_array($schema['text_length_options']) ? $schema['text_length_options'] : null
@@ -1003,13 +1020,6 @@ if (!class_exists('UCG_Admin')) {
                     wp_send_json_error(array('message' => __('Текст шаблона не может быть пустым.', 'unicontent-ai-generator')));
                 }
 
-                if ($length_option_id <= 0 && !empty($template['length_option_id'])) {
-                    $length_option_id = $this->resolve_length_option_id(
-                        (int) $template['length_option_id'],
-                        isset($schema['text_length_options']) && is_array($schema['text_length_options']) ? $schema['text_length_options'] : null
-                    );
-                }
-
                 if ($save_template) {
                     UCG_DB::update_template(
                         $template_id,
@@ -1017,8 +1027,8 @@ if (!class_exists('UCG_Admin')) {
                         $post_type,
                         $template_body,
                         !empty($template['is_default']) ? 1 : 0,
-                        $length_option_id,
-                        $vary_length
+                        0,
+                        0
                     );
                 }
             } else {
@@ -1031,7 +1041,7 @@ if (!class_exists('UCG_Admin')) {
                         wp_send_json_error(array('message' => __('Введите название шаблона.', 'unicontent-ai-generator')));
                     }
 
-                    $created_template_id = UCG_DB::create_template($template_name, $post_type, $template_body, 0, $length_option_id, $vary_length);
+                    $created_template_id = UCG_DB::create_template($template_name, $post_type, $template_body, 0, 0, 0);
                     if ($created_template_id <= 0) {
                         wp_send_json_error(array('message' => __('Не удалось сохранить новый шаблон.', 'unicontent-ai-generator')));
                     }
@@ -1058,6 +1068,8 @@ if (!class_exists('UCG_Admin')) {
             }
 
             $options = array(
+                'scenario' => $scenario,
+                'model' => $model,
                 'scope' => $selection_mode === 'filtered' ? 'filtered' : 'selected',
                 'filters' => $filters,
                 'template_body' => $template_body,
@@ -1136,11 +1148,13 @@ if (!class_exists('UCG_Admin')) {
             return (string) $status;
         }
 
-        protected function build_wizard_schema($post_type, $force_refresh_lengths = false) {
+        protected function build_wizard_schema($post_type, $force_refresh_lengths = false, $scenario = self::DEFAULT_GENERATION_SCENARIO) {
             $post_type = sanitize_key((string) $post_type);
             if ($post_type === '' || !post_type_exists($post_type)) {
                 $post_type = UCG_Tokens::get_default_post_type();
             }
+            $scenario = $this->normalize_generation_scenario($scenario);
+            $scenario_options = $this->get_generation_scenario_options();
 
             $target_fields = UCG_Tokens::get_target_fields_for_post_type($post_type);
             $templates = UCG_DB::get_templates($post_type);
@@ -1151,8 +1165,11 @@ if (!class_exists('UCG_Admin')) {
             $filter_fields = $this->get_filter_fields_for_post_type($post_type);
             $text_length_data = $this->get_text_length_options(!empty($force_refresh_lengths));
             $text_length_options = isset($text_length_data['options']) && is_array($text_length_data['options']) ? $text_length_data['options'] : array();
+            $generation_models_data = $this->get_generation_models($scenario, !empty($force_refresh_lengths));
 
             return array(
+                'scenario' => $scenario,
+                'scenario_options' => $scenario_options,
                 'post_type' => $post_type,
                 'target_fields' => $target_fields,
                 'templates' => array_map(
@@ -1162,8 +1179,6 @@ if (!class_exists('UCG_Admin')) {
                             'name' => (string) $row['name'],
                             'post_type' => isset($row['post_type']) ? (string) $row['post_type'] : '',
                             'is_default' => !empty($row['is_default']),
-                            'length_option_id' => isset($row['length_option_id']) ? (int) $row['length_option_id'] : 0,
-                            'vary_length' => !empty($row['vary_length']),
                         );
                     },
                     is_array($templates) ? $templates : array()
@@ -1172,6 +1187,11 @@ if (!class_exists('UCG_Admin')) {
                 'text_length_options' => $text_length_options,
                 'default_length_option_id' => isset($text_length_data['default_option_id']) ? (int) $text_length_data['default_option_id'] : 0,
                 'vary_length_hint' => isset($text_length_data['hint']) ? (string) $text_length_data['hint'] : '',
+                'generation_models' => isset($generation_models_data['models']) && is_array($generation_models_data['models'])
+                    ? $generation_models_data['models']
+                    : array(),
+                'default_model' => isset($generation_models_data['default_model']) ? (string) $generation_models_data['default_model'] : 'auto',
+                'generation_unit_label' => isset($generation_models_data['unit_label']) ? (string) $generation_models_data['unit_label'] : __('1 единица', 'unicontent-ai-generator'),
                 'filter_fields' => $filter_fields,
                 'filter_operators' => array(
                     array('value' => 'is_empty', 'label' => __('пусто', 'unicontent-ai-generator')),
@@ -1184,6 +1204,64 @@ if (!class_exists('UCG_Admin')) {
                     array('value' => 'gte', 'label' => '>='),
                     array('value' => 'lt', 'label' => '<'),
                     array('value' => 'lte', 'label' => '<='),
+                ),
+            );
+        }
+
+        protected function normalize_generation_scenario($scenario) {
+            $scenario = sanitize_key((string) $scenario);
+            if ($scenario === '') {
+                return self::DEFAULT_GENERATION_SCENARIO;
+            }
+
+            $allowed = array();
+            foreach ($this->get_generation_scenario_options() as $item) {
+                if (!is_array($item) || empty($item['value'])) {
+                    continue;
+                }
+                $allowed[(string) $item['value']] = true;
+            }
+
+            if (!isset($allowed[$scenario])) {
+                return self::DEFAULT_GENERATION_SCENARIO;
+            }
+
+            return $scenario;
+        }
+
+        protected function is_scenario_available($scenario) {
+            $scenario = $this->normalize_generation_scenario($scenario);
+            foreach ($this->get_generation_scenario_options() as $item) {
+                if (!is_array($item) || empty($item['value'])) {
+                    continue;
+                }
+                if ((string) $item['value'] !== $scenario) {
+                    continue;
+                }
+                return !empty($item['is_available']);
+            }
+            return false;
+        }
+
+        protected function get_generation_scenario_options() {
+            return array(
+                array(
+                    'value' => 'field_update',
+                    'label' => __('Поля', 'unicontent-ai-generator'),
+                    'icon' => 'dashicons-edit-page',
+                    'is_available' => true,
+                ),
+                array(
+                    'value' => 'seo_tags',
+                    'label' => __('SEO-теги', 'unicontent-ai-generator'),
+                    'icon' => 'dashicons-search',
+                    'is_available' => false,
+                ),
+                array(
+                    'value' => 'woo_reviews',
+                    'label' => __('Отзывы WooCommerce', 'unicontent-ai-generator'),
+                    'icon' => 'dashicons-star-filled',
+                    'is_available' => false,
                 ),
             );
         }
@@ -1745,6 +1823,135 @@ if (!class_exists('UCG_Admin')) {
             set_transient($transient_key, $result, 60);
             $in_memory_cache = $result;
             return $result;
+        }
+
+        protected function get_generation_models($scenario = self::DEFAULT_GENERATION_SCENARIO, $force_refresh = false) {
+            static $in_memory_cache = array();
+
+            $scenario = $this->normalize_generation_scenario($scenario);
+            $fallback = array(
+                'scenario' => $scenario,
+                'unit_label' => $this->scenario_unit_label($scenario),
+                'default_model' => 'auto',
+                'models' => array(
+                    array(
+                        'id' => 'auto',
+                        'name' => __('По умолчанию', 'unicontent-ai-generator'),
+                        'provider' => '',
+                        'resolved_model' => '',
+                        'is_default' => true,
+                        'multiplier' => 1.0,
+                        'estimated_credits_by_length' => array(),
+                    ),
+                ),
+            );
+
+            $cache_key = $scenario;
+            if (!$force_refresh && isset($in_memory_cache[$cache_key]) && is_array($in_memory_cache[$cache_key])) {
+                return $in_memory_cache[$cache_key];
+            }
+
+            if (!UCG_Settings::has_valid_api_key()) {
+                $in_memory_cache[$cache_key] = $fallback;
+                return $fallback;
+            }
+
+            $transient_key = 'ucg_generation_models_cache_v1_' . $cache_key;
+            if (!$force_refresh) {
+                $cached = get_transient($transient_key);
+                if (is_array($cached) && !empty($cached['models']) && is_array($cached['models'])) {
+                    $in_memory_cache[$cache_key] = $cached;
+                    return $cached;
+                }
+            }
+
+            $client = new UCG_Api_Client();
+            $response = $client->get_generation_models($scenario);
+            if (is_wp_error($response)) {
+                $in_memory_cache[$cache_key] = $fallback;
+                return $fallback;
+            }
+
+            $models = isset($response['models']) && is_array($response['models']) ? $response['models'] : array();
+            $normalized_models = array();
+            foreach ($models as $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+                $id = isset($item['id']) ? sanitize_key((string) $item['id']) : '';
+                $name = isset($item['name']) ? trim((string) $item['name']) : '';
+                if ($id === '' || $name === '') {
+                    continue;
+                }
+
+                $estimated = isset($item['estimated_credits_by_length']) && is_array($item['estimated_credits_by_length'])
+                    ? $item['estimated_credits_by_length']
+                    : array();
+                $estimated_normalized = array();
+                foreach ($estimated as $length_id => $credits) {
+                    $estimated_normalized[(string) $length_id] = max(0.0, (float) $credits);
+                }
+
+                $normalized_models[] = array(
+                    'id' => $id,
+                    'name' => $name,
+                    'provider' => isset($item['provider']) ? (string) $item['provider'] : '',
+                    'resolved_model' => isset($item['resolved_model']) ? (string) $item['resolved_model'] : '',
+                    'is_default' => !empty($item['is_default']),
+                    'multiplier' => isset($item['multiplier']) ? max(0.1, (float) $item['multiplier']) : 1.0,
+                    'estimated_credits_by_length' => $estimated_normalized,
+                );
+            }
+
+            if (empty($normalized_models)) {
+                $in_memory_cache[$cache_key] = $fallback;
+                return $fallback;
+            }
+
+            $default_model = isset($response['default_model']) ? sanitize_key((string) $response['default_model']) : 'auto';
+            if ($default_model === '') {
+                $default_model = 'auto';
+            }
+
+            $result = array(
+                'scenario' => $scenario,
+                'unit_label' => isset($response['unit_label']) && trim((string) $response['unit_label']) !== ''
+                    ? (string) $response['unit_label']
+                    : $this->scenario_unit_label($scenario),
+                'default_model' => $default_model,
+                'models' => $normalized_models,
+            );
+
+            set_transient($transient_key, $result, 60);
+            $in_memory_cache[$cache_key] = $result;
+            return $result;
+        }
+
+        protected function scenario_unit_label($scenario) {
+            $scenario = $this->normalize_generation_scenario($scenario);
+            $map = array(
+                'field_update' => __('1 поле', 'unicontent-ai-generator'),
+                'seo_tags' => __('1 SEO-пакет', 'unicontent-ai-generator'),
+                'woo_reviews' => __('1 отзыв', 'unicontent-ai-generator'),
+            );
+
+            if (isset($map[$scenario])) {
+                return $map[$scenario];
+            }
+            return __('1 единица', 'unicontent-ai-generator');
+        }
+
+        protected function clear_generation_model_caches() {
+            foreach ($this->get_generation_scenario_options() as $scenario_item) {
+                if (!is_array($scenario_item) || empty($scenario_item['value'])) {
+                    continue;
+                }
+                $scenario_key = sanitize_key((string) $scenario_item['value']);
+                if ($scenario_key === '') {
+                    continue;
+                }
+                delete_transient('ucg_generation_models_cache_v1_' . $scenario_key);
+            }
         }
 
         protected function get_prompt_library($force_refresh = false, $query_args = array()) {

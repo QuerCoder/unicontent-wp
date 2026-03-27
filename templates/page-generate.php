@@ -17,7 +17,7 @@
             <div class="ucg-stepper">
                 <button type="button" class="ucg-stepper__item is-active" data-step-target="1">
                     <span class="ucg-stepper__num">1</span>
-                    <span class="ucg-stepper__label">Тип и поле</span>
+                    <span class="ucg-stepper__label">Сценарий и тип</span>
                 </button>
                 <button type="button" class="ucg-stepper__item" data-step-target="2">
                     <span class="ucg-stepper__num">2</span>
@@ -30,6 +30,45 @@
             </div>
 
             <section class="ucg-step-panel is-active" data-step="1">
+                <label class="ucg-field">
+                    <span>Что генерировать:</span>
+                    <div class="ucg-scenario-picker" id="ucg-wizard-scenario-picker">
+                        <?php if (!empty($scenario_options) && is_array($scenario_options)) : ?>
+                            <?php foreach ($scenario_options as $scenario_item) : ?>
+                                <?php
+                                $scenario_value = isset($scenario_item['value']) ? sanitize_key((string) $scenario_item['value']) : '';
+                                $scenario_label = isset($scenario_item['label']) ? (string) $scenario_item['label'] : $scenario_value;
+                                $scenario_icon = isset($scenario_item['icon']) ? (string) $scenario_item['icon'] : 'dashicons-admin-generic';
+                                $scenario_available = !empty($scenario_item['is_available']);
+                                if ($scenario_value === '') {
+                                    continue;
+                                }
+                                ?>
+                                <label class="ucg-scenario-card<?php echo $scenario_available ? '' : ' is-disabled'; ?>">
+                                    <input
+                                        type="radio"
+                                        name="ucg-wizard-scenario"
+                                        value="<?php echo esc_attr($scenario_value); ?>"
+                                        <?php checked((string) $scenario, $scenario_value); ?>
+                                        <?php disabled(!$scenario_available); ?>
+                                    >
+                                    <span class="ucg-scenario-card__icon dashicons <?php echo esc_attr($scenario_icon); ?>" aria-hidden="true"></span>
+                                    <span class="ucg-scenario-card__label"><?php echo esc_html($scenario_label); ?></span>
+                                    <?php if (!$scenario_available) : ?>
+                                        <span class="ucg-scenario-card__meta">Скоро</span>
+                                    <?php endif; ?>
+                                </label>
+                            <?php endforeach; ?>
+                        <?php else : ?>
+                            <label class="ucg-scenario-card">
+                                <input type="radio" name="ucg-wizard-scenario" value="field_update" checked>
+                                <span class="ucg-scenario-card__icon dashicons dashicons-edit-page" aria-hidden="true"></span>
+                                <span class="ucg-scenario-card__label">Поля</span>
+                            </label>
+                        <?php endif; ?>
+                    </div>
+                </label>
+
                 <div class="ucg-grid-3">
                     <label class="ucg-field">
                         <span>Тип записей</span>
@@ -203,6 +242,19 @@
                             <span>Варьировать длину текста</span>
                         </label>
                         <p class="ucg-muted ucg-field-hint" id="ucg-wizard-vary-length-hint"></p>
+                    </div>
+                </div>
+
+                <div class="ucg-grid-2 ucg-model-controls">
+                    <label class="ucg-field">
+                        <span>Модель</span>
+                        <select id="ucg-wizard-model" class="ucg-enhanced-select" data-search-enabled="false">
+                            <option value="auto">По умолчанию</option>
+                        </select>
+                        <p class="ucg-muted ucg-field-hint" id="ucg-wizard-model-hint"></p>
+                    </label>
+                    <div class="ucg-model-unit-hint-wrap">
+                        <p class="ucg-muted ucg-field-hint" id="ucg-wizard-unit-hint"></p>
                     </div>
                 </div>
 
