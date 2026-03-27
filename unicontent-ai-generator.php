@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UNICONTENT AI Content Generator
  * Description: Generates product descriptions, SEO meta tags, and content for WordPress posts with bulk processing support.
- * Version: 0.2.7.7
+ * Version: 0.2.7.8
  * Author: UNICONTENT
  * Author URI: https://unicontent.net
  * Requires at least: 5.8
