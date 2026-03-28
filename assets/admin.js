@@ -881,7 +881,11 @@ jQuery(function ($) {
         const $unitHint = $('#ucg-wizard-unit-hint');
         const $varyLength = $('#ucg-wizard-vary-length');
         const $varyLengthHint = $('#ucg-wizard-vary-length-hint');
+        const $templateBodyStandardWrap = $('#ucg-template-body-standard-wrap');
+        const $templateBodySeoWrap = $('#ucg-template-body-seo-wrap');
         const $templateBody = $('#ucg-wizard-template-body');
+        const $templateBodySeoTitle = $('#ucg-wizard-template-body-seo-title');
+        const $templateBodySeoDescription = $('#ucg-wizard-template-body-seo-description');
         const $tokens = $('#ucg-wizard-tokens');
         const $filterRows = $('#ucg-filter-rows');
         const $previewBody = $('#ucg-preview-tbody');
@@ -898,6 +902,7 @@ jQuery(function ($) {
         const $runReviewLink = $('#ucg-run-review-link');
         const $selectionMode = $('input[name="ucg-selection-mode"]');
         const $saveTemplateChanges = $('#ucg-save-template-changes');
+        let $activeTemplateTextarea = $templateBody;
 
         function setScenarioCardState() {
             if (!$scenarioCards.length) {
@@ -912,6 +917,35 @@ jQuery(function ($) {
             state.scenario = selected || 'field_update';
             setScenarioCardState();
             return state.scenario;
+        }
+
+        function activeTemplateInput() {
+            if ($activeTemplateTextarea && $activeTemplateTextarea.length && $activeTemplateTextarea.is(':visible')) {
+                return $activeTemplateTextarea;
+            }
+            if ($templateBody.is(':visible')) {
+                return $templateBody;
+            }
+            if ($templateBodySeoTitle.is(':visible')) {
+                return $templateBodySeoTitle;
+            }
+            return $templateBody;
+        }
+
+        function updateScenarioTemplateInputs() {
+            const scenario = getScenario();
+            const isSeo = scenario === 'seo_tags';
+            if ($templateBodyStandardWrap.length) {
+                $templateBodyStandardWrap.toggle(!isSeo);
+            }
+            if ($templateBodySeoWrap.length) {
+                $templateBodySeoWrap.prop('hidden', !isSeo).toggle(isSeo);
+            }
+            if (isSeo) {
+                $activeTemplateTextarea = $templateBodySeoTitle;
+            } else {
+                $activeTemplateTextarea = $templateBody;
+            }
         }
 
         function setRunStatus(message, isError) {
@@ -1146,7 +1180,10 @@ jQuery(function ($) {
                     : jsT('Целевое поле');
                 $targetFieldLabel.text(targetLabel);
             }
-            let html = jsT('<option value="">Выберите поле</option>');
+            const emptyOptionLabel = (state.schema && String(state.schema.scenario || '') === 'seo_tags')
+                ? jsT('Выберите SEO-плагин')
+                : jsT('Выберите поле');
+            let html = '<option value="">' + escapeHtml(emptyOptionLabel) + '</option>';
             sourceFields.forEach(function (field) {
                 const value = field && field.value ? String(field.value) : '';
                 if (!value) {
@@ -1166,42 +1203,13 @@ jQuery(function ($) {
                 }
             }
             initEnhancedSelects($targetField);
+            updateScenarioTemplateInputs();
         }
 
         function renderTemplates() {
             const templates = Array.isArray(state.schema.templates) ? state.schema.templates : [];
-            const fallbackTemplates = [];
             const currentTemplateValue = String($templateSelect.val() || '');
-            $templateSelect.find('option').each(function () {
-                const $option = $(this);
-                const id = Number($option.attr('value') || 0);
-                if (!id) {
-                    return;
-                }
-
-                const text = String($option.text() || '').trim();
-                if (!text) {
-                    return;
-                }
-
-                let name = text;
-                let postType = '';
-                const idPrefixPattern = new RegExp('^#' + id + jsT('\\s+—\\s*'));
-                name = name.replace(idPrefixPattern, '');
-                const postTypeMatch = name.match(/\(([^()]+)\)\s*$/);
-                if (postTypeMatch) {
-                    postType = String(postTypeMatch[1] || '').trim();
-                    name = name.replace(/\s*\([^()]+\)\s*$/, '').trim();
-                }
-
-                fallbackTemplates.push({
-                    id: id,
-                    name: name || ('#' + id),
-                    post_type: postType,
-                    is_default: currentTemplateValue !== '' && currentTemplateValue === String(id)
-                });
-            });
-            const sourceTemplates = templates.length ? templates : fallbackTemplates;
+            const sourceTemplates = templates;
             let html = jsT('<option value="">Не выбрано</option>');
             let defaultTemplateId = 0;
             sourceTemplates.forEach(function (template) {
@@ -1226,9 +1234,12 @@ jQuery(function ($) {
                 $templateSelect.val('');
             }
             $templateBody.val('');
+            $templateBodySeoTitle.val('');
+            $templateBodySeoDescription.val('');
             $templateName.val('');
             $saveTemplateChanges.prop('checked', false);
             updateTemplateMode();
+            updateScenarioTemplateInputs();
             resetRunMonitor();
             initEnhancedSelects($templateSelect);
             const activeTemplateId = Number($templateSelect.val() || 0);
@@ -1641,12 +1652,15 @@ jQuery(function ($) {
             updateTemplateMode();
             if (!id) {
                 $templateBody.val('');
+                $templateBodySeoTitle.val('');
+                $templateBodySeoDescription.val('');
                 return;
             }
 
             $.post(ucgAdmin.ajaxUrl, {
                 action: 'ucg_wizard_load_template',
                 nonce: ucgAdmin.nonce,
+                scenario: getScenario(),
                 template_id: id
             }).done(function (response) {
                 if (!response.success) {
@@ -1658,7 +1672,19 @@ jQuery(function ($) {
                 const data = response.data || {};
                 const template = data.template || {};
                 $templateBody.val(String(template.body || ''));
+                $templateBodySeoTitle.val(String(template.seo_title_prompt || ''));
+                $templateBodySeoDescription.val(String(template.seo_description_prompt || ''));
+                if (getScenario() === 'seo_tags') {
+                    const fallback = String(template.body || '');
+                    if (!$templateBodySeoTitle.val() && fallback) {
+                        $templateBodySeoTitle.val(fallback);
+                    }
+                    if (!$templateBodySeoDescription.val() && fallback) {
+                        $templateBodySeoDescription.val(fallback);
+                    }
+                }
                 renderTokenButtons($tokens, Array.isArray(data.tokens) ? data.tokens : []);
+                updateScenarioTemplateInputs();
             }).fail(function () {
                 setRunStatus(jsT('AJAX ошибка при загрузке шаблона.'), true);
             });
@@ -1718,6 +1744,8 @@ jQuery(function ($) {
             const templateId = Number($templateSelect.val() || 0);
             const templateName = String($templateName.val() || '').trim();
             const templateBody = String($templateBody.val() || '').trim();
+            const templateBodySeoTitle = String($templateBodySeoTitle.val() || '').trim();
+            const templateBodySeoDescription = String($templateBodySeoDescription.val() || '').trim();
             const mode = getSelectionMode();
             const filters = normalizeFilters();
             const lengthOptionId = Number($lengthOption.val() || 0);
@@ -1736,7 +1764,12 @@ jQuery(function ($) {
                 return;
             }
 
-            if (!templateBody) {
+            if (scenario === 'seo_tags') {
+                if (!templateBodySeoTitle || !templateBodySeoDescription) {
+                    setRunStatus(jsT('Заполните шаблоны для SEO title и SEO description.'), true);
+                    return;
+                }
+            } else if (!templateBody) {
                 setRunStatus(jsT('Шаблон пустой. Заполните текст.'), true);
                 return;
             }
@@ -1771,6 +1804,8 @@ jQuery(function ($) {
                 template_id: templateId,
                 template_name: templateName,
                 template_body: templateBody,
+                template_body_seo_title: templateBodySeoTitle,
+                template_body_seo_description: templateBodySeoDescription,
                 length_option_id: lengthOptionId,
                 vary_length: varyLength,
                 save_template: $saveTemplateChanges.is(':checked') ? 1 : 0,
@@ -1967,7 +2002,7 @@ jQuery(function ($) {
                 if (!token) {
                     return;
                 }
-                insertAtCursor($templateBody, String(token));
+                insertAtCursor(activeTemplateInput(), String(token));
             });
 
             $(document).on('dragstart', '#ucg-wizard-tokens .ucg-token-btn', function (event) {
@@ -1980,11 +2015,15 @@ jQuery(function ($) {
                 }
             });
 
-            $templateBody.on('dragover', function (event) {
+            $(document).on('focus', '.ucg-wizard-template-input', function () {
+                $activeTemplateTextarea = $(this);
+            });
+
+            $(document).on('dragover', '.ucg-wizard-template-input', function (event) {
                 event.preventDefault();
             });
 
-            $templateBody.on('drop', function (event) {
+            $(document).on('drop', '.ucg-wizard-template-input', function (event) {
                 event.preventDefault();
                 if (!event.originalEvent || !event.originalEvent.dataTransfer) {
                     return;
@@ -1993,7 +2032,11 @@ jQuery(function ($) {
                 if (!token) {
                     return;
                 }
-                insertAtCursor($templateBody, token);
+                const $targetInput = $(this);
+                if ($targetInput.length) {
+                    $activeTemplateTextarea = $targetInput;
+                }
+                insertAtCursor(activeTemplateInput(), token);
             });
 
             $(window).on('beforeunload', function () {

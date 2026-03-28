@@ -19,6 +19,7 @@ if (!class_exists('UCG_Activator')) {
                 id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
                 name VARCHAR(190) NOT NULL,
                 post_type VARCHAR(64) NOT NULL,
+                scenario VARCHAR(32) NOT NULL DEFAULT 'field_update',
                 body LONGTEXT NOT NULL,
                 length_option_id BIGINT UNSIGNED NULL,
                 vary_length TINYINT(1) NOT NULL DEFAULT 0,
@@ -28,6 +29,7 @@ if (!class_exists('UCG_Activator')) {
                 updated_at DATETIME NOT NULL,
                 PRIMARY KEY (id),
                 KEY post_type (post_type),
+                KEY scenario (scenario),
                 KEY is_default (is_default),
                 KEY length_option_id (length_option_id)
             ) {$charset_collate};";

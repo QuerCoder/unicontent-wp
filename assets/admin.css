@@ -366,6 +366,11 @@ body.ucg-review-modal-open {
     align-items: end;
 }
 
+#ucg-template-body-seo-wrap .ucg-grid-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+}
+
 .ucg-actions-row {
     display: flex;
     align-items: center;

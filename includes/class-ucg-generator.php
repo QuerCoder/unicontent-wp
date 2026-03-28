@@ -164,6 +164,8 @@ if (!class_exists('UCG_Generator')) {
             $vary_length = 0;
             $model = 'auto';
             $scenario = 'field_update';
+            $seo_title_prompt_template = '';
+            $seo_description_prompt_template = '';
 
             if ($item_id <= 0 || $post_id <= 0 || $run_id <= 0) {
                 return new WP_Error('ucg_invalid_queue_item', __('Некорректный элемент очереди.', 'unicontent-ai-generator'));
@@ -179,6 +181,8 @@ if (!class_exists('UCG_Generator')) {
                     if ($scenario === '') {
                         $scenario = 'field_update';
                     }
+                    $seo_title_prompt_template = isset($options['seo_title_prompt']) ? (string) $options['seo_title_prompt'] : '';
+                    $seo_description_prompt_template = isset($options['seo_description_prompt']) ? (string) $options['seo_description_prompt'] : '';
                     $length_option_id = isset($options['length_option_id']) ? (int) $options['length_option_id'] : 0;
                     $vary_length = !empty($options['vary_length']) ? 1 : 0;
                     $model = isset($options['model']) ? sanitize_key((string) $options['model']) : 'auto';
@@ -196,6 +200,162 @@ if (!class_exists('UCG_Generator')) {
                     'error_message' => '',
                 )
             );
+
+            $system_prompt = isset($settings['system_prompt']) ? (string) $settings['system_prompt'] : '';
+            $max_tokens = isset($settings['max_tokens']) ? (int) $settings['max_tokens'] : 1500;
+            $generation_mode = isset($settings['generation_mode']) ? sanitize_key((string) $settings['generation_mode']) : 'review';
+            if (!in_array($generation_mode, array('review', 'publish'), true)) {
+                $generation_mode = 'review';
+            }
+
+            if ($scenario === 'seo_tags') {
+                if ($seo_title_prompt_template === '' && $seo_description_prompt_template === '' && $template_body !== '') {
+                    $seo_title_prompt_template = $template_body;
+                    $seo_description_prompt_template = $template_body;
+                }
+
+                if (trim($seo_title_prompt_template) === '' || trim($seo_description_prompt_template) === '') {
+                    UCG_DB::update_run_item(
+                        $item_id,
+                        array(
+                            'status' => 'failed',
+                            'error_message' => __('SEO-шаблоны не найдены или пустые.', 'unicontent-ai-generator'),
+                        )
+                    );
+                    return new WP_Error('ucg_template_missing', __('SEO-шаблон не найден.', 'unicontent-ai-generator'));
+                }
+
+                $seo_title_prompt = UCG_Tokens::render_prompt_for_post($seo_title_prompt_template, $post_id);
+                $seo_description_prompt = UCG_Tokens::render_prompt_for_post($seo_description_prompt_template, $post_id);
+                if (trim($seo_title_prompt) === '' || trim($seo_description_prompt) === '') {
+                    $combined_prompt = "SEO title:\n" . $seo_title_prompt . "\n\nSEO description:\n" . $seo_description_prompt;
+                    UCG_DB::update_run_item(
+                        $item_id,
+                        array(
+                            'status' => 'failed',
+                            'prompt' => $combined_prompt,
+                            'error_message' => __('SEO-промпт пустой после подстановки переменных.', 'unicontent-ai-generator'),
+                        )
+                    );
+                    return new WP_Error('ucg_prompt_empty', __('SEO-промпт пустой.', 'unicontent-ai-generator'));
+                }
+
+                $seo_title_prompt = $this->build_prompt_for_single_seo_field($seo_title_prompt, 'title');
+                $seo_description_prompt = $this->build_prompt_for_single_seo_field($seo_description_prompt, 'description');
+                $combined_prompt = "SEO title:\n" . $seo_title_prompt . "\n\nSEO description:\n" . $seo_description_prompt;
+
+                $response_title = $api_client->generate_text($seo_title_prompt, $system_prompt, $max_tokens, $length_option_id, $vary_length, $model);
+                if (is_wp_error($response_title)) {
+                    $next_status = ($attempts + 1) >= 3 ? 'failed' : 'queued';
+                    if ($this->is_fatal_api_error($response_title)) {
+                        $next_status = 'failed';
+                    }
+                    UCG_DB::update_run_item(
+                        $item_id,
+                        array(
+                            'status' => $next_status,
+                            'prompt' => $combined_prompt,
+                            'error_message' => $response_title->get_error_message(),
+                        )
+                    );
+                    return $response_title;
+                }
+
+                $generated_title = $this->normalize_single_line_result(isset($response_title['text']) ? (string) $response_title['text'] : '');
+                if ($generated_title === '') {
+                    $next_status = ($attempts + 1) >= 3 ? 'failed' : 'queued';
+                    UCG_DB::update_run_item(
+                        $item_id,
+                        array(
+                            'status' => $next_status,
+                            'prompt' => $combined_prompt,
+                            'error_message' => __('API вернул пустой SEO title.', 'unicontent-ai-generator'),
+                            'credits_spent' => isset($response_title['credits_spent']) ? (float) $response_title['credits_spent'] : 0.0,
+                            'credits_remaining' => isset($response_title['credits_remaining']) ? (float) $response_title['credits_remaining'] : 0.0,
+                        )
+                    );
+                    return new WP_Error('ucg_empty_result', __('Пустой SEO title от API.', 'unicontent-ai-generator'));
+                }
+
+                $response_description = $api_client->generate_text($seo_description_prompt, $system_prompt, $max_tokens, $length_option_id, $vary_length, $model);
+                if (is_wp_error($response_description)) {
+                    $next_status = ($attempts + 1) >= 3 ? 'failed' : 'queued';
+                    if ($this->is_fatal_api_error($response_description)) {
+                        $next_status = 'failed';
+                    }
+                    UCG_DB::update_run_item(
+                        $item_id,
+                        array(
+                            'status' => $next_status,
+                            'prompt' => $combined_prompt,
+                            'error_message' => $response_description->get_error_message(),
+                            'credits_spent' => isset($response_title['credits_spent']) ? (float) $response_title['credits_spent'] : 0.0,
+                            'credits_remaining' => isset($response_title['credits_remaining']) ? (float) $response_title['credits_remaining'] : 0.0,
+                        )
+                    );
+                    return $response_description;
+                }
+
+                $generated_description = $this->normalize_single_line_result(isset($response_description['text']) ? (string) $response_description['text'] : '');
+                if ($generated_description === '') {
+                    $next_status = ($attempts + 1) >= 3 ? 'failed' : 'queued';
+                    UCG_DB::update_run_item(
+                        $item_id,
+                        array(
+                            'status' => $next_status,
+                            'prompt' => $combined_prompt,
+                            'error_message' => __('API вернул пустой SEO description.', 'unicontent-ai-generator'),
+                            'credits_spent' => $this->sum_credits_spent($response_title, $response_description),
+                            'credits_remaining' => isset($response_description['credits_remaining'])
+                                ? (float) $response_description['credits_remaining']
+                                : (isset($response_title['credits_remaining']) ? (float) $response_title['credits_remaining'] : 0.0),
+                        )
+                    );
+                    return new WP_Error('ucg_empty_result', __('Пустой SEO description от API.', 'unicontent-ai-generator'));
+                }
+
+                $generated_text = $this->build_seo_payload($generated_title, $generated_description);
+                $credits_spent = $this->sum_credits_spent($response_title, $response_description);
+                $credits_remaining = isset($response_description['credits_remaining'])
+                    ? (float) $response_description['credits_remaining']
+                    : (isset($response_title['credits_remaining']) ? (float) $response_title['credits_remaining'] : 0.0);
+
+                $update_data = array(
+                    'status' => 'generated',
+                    'prompt' => $combined_prompt,
+                    'generated_text' => $generated_text,
+                    'error_message' => '',
+                    'credits_spent' => $credits_spent,
+                    'credits_remaining' => $credits_remaining,
+                    'generated_at' => current_time('mysql', true),
+                );
+
+                if ($generation_mode === 'publish') {
+                    $target_field = isset($item['target_field']) ? (string) $item['target_field'] : '';
+                    $write_result = UCG_Tokens::write_generated_value($post_id, $target_field, $generated_text);
+                    if (is_wp_error($write_result)) {
+                        UCG_DB::update_run_item(
+                            $item_id,
+                            array(
+                                'status' => 'failed',
+                                'prompt' => $combined_prompt,
+                                'generated_text' => $generated_text,
+                                'error_message' => $write_result->get_error_message(),
+                                'credits_spent' => $credits_spent,
+                                'credits_remaining' => $credits_remaining,
+                                'generated_at' => current_time('mysql', true),
+                            )
+                        );
+                        return $write_result;
+                    }
+
+                    $update_data['status'] = 'approved';
+                    $update_data['reviewed_at'] = current_time('mysql', true);
+                }
+
+                UCG_DB::update_run_item($item_id, $update_data);
+                return true;
+            }
 
             if ($template_body === '') {
                 UCG_DB::update_run_item(
@@ -219,14 +379,6 @@ if (!class_exists('UCG_Generator')) {
                     )
                 );
                 return new WP_Error('ucg_prompt_empty', __('Промпт пустой.', 'unicontent-ai-generator'));
-            }
-            $prompt = $this->build_prompt_for_scenario($prompt, $scenario);
-
-            $system_prompt = isset($settings['system_prompt']) ? (string) $settings['system_prompt'] : '';
-            $max_tokens = isset($settings['max_tokens']) ? (int) $settings['max_tokens'] : 1500;
-            $generation_mode = isset($settings['generation_mode']) ? sanitize_key((string) $settings['generation_mode']) : 'review';
-            if (!in_array($generation_mode, array('review', 'publish'), true)) {
-                $generation_mode = 'review';
             }
 
             $response = $api_client->generate_text($prompt, $system_prompt, $max_tokens, $length_option_id, $vary_length, $model);
@@ -298,19 +450,47 @@ if (!class_exists('UCG_Generator')) {
             return true;
         }
 
-        protected function build_prompt_for_scenario($prompt, $scenario) {
+        protected function build_prompt_for_single_seo_field($prompt, $field) {
             $prompt = (string) $prompt;
-            $scenario = sanitize_key((string) $scenario);
+            $field = sanitize_key((string) $field);
 
-            if ($scenario !== 'seo_tags') {
+            if ($field !== 'title' && $field !== 'description') {
                 return $prompt;
             }
 
-            $instruction = "Верни только JSON без markdown и комментариев. Формат: "
-                . "{\"title\":\"...\",\"description\":\"...\",\"focus_keyword\":\"...\"}. "
-                . "title и description обязательны.";
+            $instruction = $field === 'title'
+                ? __('Верни только готовый SEO title без кавычек, markdown и комментариев.', 'unicontent-ai-generator')
+                : __('Верни только готовый SEO description без кавычек, markdown и комментариев.', 'unicontent-ai-generator');
 
             return $prompt . "\n\n" . $instruction;
+        }
+
+        protected function normalize_single_line_result($text) {
+            $text = trim((string) $text);
+            if ($text === '') {
+                return '';
+            }
+
+            $text = wp_strip_all_tags($text);
+            $text = preg_replace('/\s+/u', ' ', $text);
+            $text = trim((string) $text);
+            $text = trim($text, "\"'` ");
+            return trim($text);
+        }
+
+        protected function build_seo_payload($title, $description) {
+            $payload = array(
+                'title' => (string) $title,
+                'description' => (string) $description,
+                'focus_keyword' => '',
+            );
+            return wp_json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
+
+        protected function sum_credits_spent($first_response, $second_response) {
+            $first = is_array($first_response) && isset($first_response['credits_spent']) ? (float) $first_response['credits_spent'] : 0.0;
+            $second = is_array($second_response) && isset($second_response['credits_spent']) ? (float) $second_response['credits_spent'] : 0.0;
+            return $first + $second;
         }
 
         protected function is_fatal_api_error(WP_Error $error) {

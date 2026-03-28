@@ -445,8 +445,8 @@ if (!class_exists('UCG_Tokens')) {
                         'title' => 'rank_math_title',
                         'description' => 'rank_math_description',
                         'focus_keyword' => 'rank_math_focus_keyword',
-                        'og_title' => 'rank_math_twitter_title',
-                        'og_description' => 'rank_math_twitter_description',
+                        'og_title' => array('rank_math_facebook_title', 'rank_math_twitter_title'),
+                        'og_description' => array('rank_math_facebook_description', 'rank_math_twitter_description'),
                     );
                 case 'aioseo':
                     return array(
@@ -491,10 +491,24 @@ if (!class_exists('UCG_Tokens')) {
             }
 
             if (!empty($meta_keys['og_title']) && $title !== '') {
-                update_post_meta($post_id, $meta_keys['og_title'], $title);
+                $og_title_keys = is_array($meta_keys['og_title']) ? $meta_keys['og_title'] : array($meta_keys['og_title']);
+                foreach ($og_title_keys as $og_title_key) {
+                    $og_title_key = sanitize_key((string) $og_title_key);
+                    if ($og_title_key === '') {
+                        continue;
+                    }
+                    update_post_meta($post_id, $og_title_key, $title);
+                }
             }
             if (!empty($meta_keys['og_description']) && $description !== '') {
-                update_post_meta($post_id, $meta_keys['og_description'], $description);
+                $og_description_keys = is_array($meta_keys['og_description']) ? $meta_keys['og_description'] : array($meta_keys['og_description']);
+                foreach ($og_description_keys as $og_description_key) {
+                    $og_description_key = sanitize_key((string) $og_description_key);
+                    if ($og_description_key === '') {
+                        continue;
+                    }
+                    update_post_meta($post_id, $og_description_key, $description);
+                }
             }
 
             return true;

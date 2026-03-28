@@ -271,10 +271,25 @@
                     </div>
                 </div>
 
-                <label class="ucg-field">
-                    <span>Текст шаблона</span>
-                    <textarea id="ucg-wizard-template-body" rows="12"></textarea>
-                </label>
+                <div id="ucg-template-body-standard-wrap">
+                    <label class="ucg-field">
+                        <span>Текст шаблона</span>
+                        <textarea id="ucg-wizard-template-body" class="ucg-wizard-template-input" rows="12"></textarea>
+                    </label>
+                </div>
+
+                <div id="ucg-template-body-seo-wrap" hidden>
+                    <div class="ucg-grid-2">
+                        <label class="ucg-field">
+                            <span>Шаблон для SEO title</span>
+                            <textarea id="ucg-wizard-template-body-seo-title" class="ucg-wizard-template-input" rows="8" placeholder="Например: Сгенерируй только SEO title до 60 символов"></textarea>
+                        </label>
+                        <label class="ucg-field">
+                            <span>Шаблон для SEO description</span>
+                            <textarea id="ucg-wizard-template-body-seo-description" class="ucg-wizard-template-input" rows="8" placeholder="Например: Сгенерируй meta description 140-160 символов"></textarea>
+                        </label>
+                    </div>
+                </div>
 
                 <div class="ucg-token-panel">
                     <div class="ucg-token-panel__head">

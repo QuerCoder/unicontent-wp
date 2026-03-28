@@ -7,6 +7,7 @@ if (!defined('ABSPATH')) {
 if (!class_exists('UCG_DB')) {
     class UCG_DB {
         protected static $table_cache = array();
+        protected static $template_has_scenario_column = null;
 
         public static function table_templates() {
             return self::resolve_table_name('ucg_templates');
@@ -20,7 +21,7 @@ if (!class_exists('UCG_DB')) {
             return self::resolve_table_name('ucg_run_items');
         }
 
-        public static function create_template($name, $post_type, $body, $is_default = 0, $length_option_id = 0, $vary_length = 0) {
+        public static function create_template($name, $post_type, $body, $is_default = 0, $length_option_id = 0, $vary_length = 0, $scenario = 'field_update') {
             global $wpdb;
 
             $now = current_time('mysql', true);
@@ -31,29 +32,40 @@ if (!class_exists('UCG_DB')) {
             $is_default = $is_default ? 1 : 0;
             $length_option_id = max(0, (int) $length_option_id);
             $vary_length = $vary_length ? 1 : 0;
+            $scenario = sanitize_key((string) $scenario);
+            if ($scenario === '') {
+                $scenario = 'field_update';
+            }
 
             if ($name === '' || $post_type === '' || $body === '') {
                 return 0;
             }
 
             if ($is_default) {
-                self::clear_default_template_for_post_type($post_type);
+                self::clear_default_template_for_post_type($post_type, 0, $scenario);
+            }
+
+            $insert_data = array(
+                'name' => $name,
+                'post_type' => $post_type,
+                'body' => $body,
+                'length_option_id' => $length_option_id > 0 ? $length_option_id : null,
+                'vary_length' => $vary_length,
+                'is_active' => 1,
+                'is_default' => $is_default,
+                'created_at' => $now,
+                'updated_at' => $now,
+            );
+            $insert_formats = array('%s', '%s', '%s', '%d', '%d', '%d', '%d', '%s', '%s');
+            if (self::template_has_scenario_column()) {
+                $insert_data['scenario'] = $scenario;
+                $insert_formats[] = '%s';
             }
 
             $ok = $wpdb->insert(
                 $table,
-                array(
-                    'name' => $name,
-                    'post_type' => $post_type,
-                    'body' => $body,
-                    'length_option_id' => $length_option_id > 0 ? $length_option_id : null,
-                    'vary_length' => $vary_length,
-                    'is_active' => 1,
-                    'is_default' => $is_default,
-                    'created_at' => $now,
-                    'updated_at' => $now,
-                ),
-                array('%s', '%s', '%s', '%d', '%d', '%d', '%d', '%s', '%s')
+                $insert_data,
+                $insert_formats
             );
 
             if (!$ok) {
@@ -63,7 +75,7 @@ if (!class_exists('UCG_DB')) {
             return (int) $wpdb->insert_id;
         }
 
-        public static function update_template($template_id, $name, $post_type, $body, $is_default = 0, $length_option_id = 0, $vary_length = 0) {
+        public static function update_template($template_id, $name, $post_type, $body, $is_default = 0, $length_option_id = 0, $vary_length = 0, $scenario = 'field_update') {
             global $wpdb;
 
             $template_id = (int) $template_id;
@@ -78,28 +90,39 @@ if (!class_exists('UCG_DB')) {
             $is_default = $is_default ? 1 : 0;
             $length_option_id = max(0, (int) $length_option_id);
             $vary_length = $vary_length ? 1 : 0;
+            $scenario = sanitize_key((string) $scenario);
+            if ($scenario === '') {
+                $scenario = 'field_update';
+            }
 
             if ($name === '' || $post_type === '' || $body === '') {
                 return false;
             }
 
             if ($is_default) {
-                self::clear_default_template_for_post_type($post_type, $template_id);
+                self::clear_default_template_for_post_type($post_type, $template_id, $scenario);
+            }
+
+            $update_data = array(
+                'name' => $name,
+                'post_type' => $post_type,
+                'body' => $body,
+                'length_option_id' => $length_option_id > 0 ? $length_option_id : null,
+                'vary_length' => $vary_length,
+                'is_default' => $is_default,
+                'updated_at' => current_time('mysql', true),
+            );
+            $update_formats = array('%s', '%s', '%s', '%d', '%d', '%d', '%s');
+            if (self::template_has_scenario_column()) {
+                $update_data['scenario'] = $scenario;
+                $update_formats[] = '%s';
             }
 
             $result = $wpdb->update(
                 $table,
-                array(
-                    'name' => $name,
-                    'post_type' => $post_type,
-                    'body' => $body,
-                    'length_option_id' => $length_option_id > 0 ? $length_option_id : null,
-                    'vary_length' => $vary_length,
-                    'is_default' => $is_default,
-                    'updated_at' => current_time('mysql', true),
-                ),
+                $update_data,
                 array('id' => $template_id),
-                array('%s', '%s', '%s', '%d', '%d', '%d', '%s'),
+                $update_formats,
                 array('%d')
             );
 
@@ -135,16 +158,35 @@ if (!class_exists('UCG_DB')) {
             return is_array($row) ? $row : null;
         }
 
-        public static function get_templates($post_type = '') {
+        public static function get_templates($post_type = '', $scenario = '') {
             global $wpdb;
             $table = self::table_templates();
             $post_type = sanitize_key((string) $post_type);
+            $scenario = sanitize_key((string) $scenario);
+            $has_scenario_column = self::template_has_scenario_column();
 
-            if ($post_type !== '') {
+            if ($post_type !== '' && $scenario !== '' && $has_scenario_column) {
+                $rows = $wpdb->get_results(
+                    $wpdb->prepare(
+                        "SELECT * FROM {$table} WHERE post_type = %s AND scenario = %s ORDER BY is_default DESC, id DESC",
+                        $post_type,
+                        $scenario
+                    ),
+                    ARRAY_A
+                );
+            } elseif ($post_type !== '') {
                 $rows = $wpdb->get_results(
                     $wpdb->prepare(
                         "SELECT * FROM {$table} WHERE post_type = %s ORDER BY is_default DESC, id DESC",
                         $post_type
+                    ),
+                    ARRAY_A
+                );
+            } elseif ($scenario !== '' && $has_scenario_column) {
+                $rows = $wpdb->get_results(
+                    $wpdb->prepare(
+                        "SELECT * FROM {$table} WHERE scenario = %s ORDER BY post_type ASC, is_default DESC, id DESC",
+                        $scenario
                     ),
                     ARRAY_A
                 );
@@ -759,24 +801,58 @@ if (!class_exists('UCG_DB')) {
             return $result;
         }
 
-        protected static function clear_default_template_for_post_type($post_type, $except_id = 0) {
+        protected static function clear_default_template_for_post_type($post_type, $except_id = 0, $scenario = 'field_update') {
             global $wpdb;
 
             $post_type = sanitize_key((string) $post_type);
             $except_id = (int) $except_id;
+            $scenario = sanitize_key((string) $scenario);
+            if ($scenario === '') {
+                $scenario = 'field_update';
+            }
+            $has_scenario_column = self::template_has_scenario_column();
             if ($post_type === '') {
                 return;
             }
 
             if ($except_id > 0) {
+                if ($has_scenario_column) {
+                    $wpdb->query(
+                        $wpdb->prepare(
+                            "UPDATE " . self::table_templates() . "
+                             SET is_default = 0
+                             WHERE post_type = %s
+                               AND scenario = %s
+                               AND id <> %d",
+                            $post_type,
+                            $scenario,
+                            $except_id
+                        )
+                    );
+                } else {
+                    $wpdb->query(
+                        $wpdb->prepare(
+                            "UPDATE " . self::table_templates() . "
+                             SET is_default = 0
+                             WHERE post_type = %s
+                               AND id <> %d",
+                            $post_type,
+                            $except_id
+                        )
+                    );
+                }
+                return;
+            }
+
+            if ($has_scenario_column) {
                 $wpdb->query(
                     $wpdb->prepare(
                         "UPDATE " . self::table_templates() . "
                          SET is_default = 0
                          WHERE post_type = %s
-                           AND id <> %d",
+                           AND scenario = %s",
                         $post_type,
-                        $except_id
+                        $scenario
                     )
                 );
                 return;
@@ -790,6 +866,18 @@ if (!class_exists('UCG_DB')) {
                     $post_type
                 )
             );
+        }
+
+        protected static function template_has_scenario_column() {
+            if (self::$template_has_scenario_column !== null) {
+                return !empty(self::$template_has_scenario_column);
+            }
+
+            global $wpdb;
+            $table = self::table_templates();
+            $column = $wpdb->get_var("SHOW COLUMNS FROM {$table} LIKE 'scenario'");
+            self::$template_has_scenario_column = !empty($column);
+            return !empty(self::$template_has_scenario_column);
         }
 
         protected static function resolve_table_name($suffix) {
