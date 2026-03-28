@@ -188,11 +188,7 @@ if (!class_exists('UCG_Admin')) {
                 ? $wizard_schema['target_fields']
                 : array();
             if (empty($target_fields)) {
-                $target_fields = array(
-                    array('value' => 'post:post_content', 'label' => __('Содержание (post_content)', 'unicontent-ai-generator')),
-                    array('value' => 'post:post_title', 'label' => __('Заголовок (post_title)', 'unicontent-ai-generator')),
-                    array('value' => 'post:post_excerpt', 'label' => __('Краткое описание (post_excerpt)', 'unicontent-ai-generator')),
-                );
+                $target_fields = $this->get_target_fields_for_scenario($post_type, $scenario);
             }
             $text_length_options = isset($wizard_schema['text_length_options']) && is_array($wizard_schema['text_length_options'])
                 ? $wizard_schema['text_length_options']
@@ -211,6 +207,9 @@ if (!class_exists('UCG_Admin')) {
             if ($default_length_option_id <= 0 && !empty($text_length_options[0]['id'])) {
                 $default_length_option_id = (int) $text_length_options[0]['id'];
             }
+            $target_field_label = isset($wizard_schema['target_field_label']) && trim((string) $wizard_schema['target_field_label']) !== ''
+                ? (string) $wizard_schema['target_field_label']
+                : __('Целевое поле', 'unicontent-ai-generator');
             $scenario_options = isset($wizard_schema['scenario_options']) && is_array($wizard_schema['scenario_options'])
                 ? $wizard_schema['scenario_options']
                 : $this->get_generation_scenario_options();
@@ -1156,7 +1155,7 @@ if (!class_exists('UCG_Admin')) {
             $scenario = $this->normalize_generation_scenario($scenario);
             $scenario_options = $this->get_generation_scenario_options();
 
-            $target_fields = UCG_Tokens::get_target_fields_for_post_type($post_type);
+            $target_fields = $this->get_target_fields_for_scenario($post_type, $scenario);
             $templates = UCG_DB::get_templates($post_type);
             if (empty($templates)) {
                 $templates = UCG_DB::get_templates();
@@ -1171,6 +1170,7 @@ if (!class_exists('UCG_Admin')) {
                 'scenario' => $scenario,
                 'scenario_options' => $scenario_options,
                 'post_type' => $post_type,
+                'target_field_label' => $this->target_field_label_for_scenario($scenario),
                 'target_fields' => $target_fields,
                 'templates' => array_map(
                     function ($row) {
@@ -1216,7 +1216,7 @@ if (!class_exists('UCG_Admin')) {
 
             $allowed = array();
             foreach ($this->get_generation_scenario_options() as $item) {
-                if (!is_array($item) || empty($item['value'])) {
+                if (!is_array($item) || empty($item['value']) || empty($item['is_available'])) {
                     continue;
                 }
                 $allowed[(string) $item['value']] = true;
@@ -1244,26 +1244,75 @@ if (!class_exists('UCG_Admin')) {
         }
 
         protected function get_generation_scenario_options() {
+            $seo_available = class_exists('UCG_Tokens') ? UCG_Tokens::has_supported_seo_plugin() : false;
             return array(
                 array(
                     'value' => 'field_update',
                     'label' => __('Поля', 'unicontent-ai-generator'),
                     'icon' => 'dashicons-edit-page',
+                    'description' => __('Обновление одного выбранного поля записи.', 'unicontent-ai-generator'),
                     'is_available' => true,
                 ),
                 array(
                     'value' => 'seo_tags',
                     'label' => __('SEO-теги', 'unicontent-ai-generator'),
                     'icon' => 'dashicons-search',
-                    'is_available' => false,
+                    'description' => __('Title и Description для активного SEO-плагина.', 'unicontent-ai-generator'),
+                    'is_available' => $seo_available,
                 ),
                 array(
                     'value' => 'woo_reviews',
                     'label' => __('Отзывы WooCommerce', 'unicontent-ai-generator'),
                     'icon' => 'dashicons-star-filled',
+                    'description' => __('Генерация отзывов к товарам WooCommerce.', 'unicontent-ai-generator'),
                     'is_available' => false,
                 ),
             );
+        }
+
+        protected function target_field_label_for_scenario($scenario) {
+            $scenario = $this->normalize_generation_scenario($scenario);
+            if ($scenario === 'seo_tags') {
+                return __('SEO профиль', 'unicontent-ai-generator');
+            }
+            return __('Целевое поле', 'unicontent-ai-generator');
+        }
+
+        protected function get_target_fields_for_scenario($post_type, $scenario) {
+            $scenario = $this->normalize_generation_scenario($scenario);
+            $post_type = sanitize_key((string) $post_type);
+
+            if ($scenario === 'seo_tags') {
+                $seo_profiles = class_exists('UCG_Tokens') ? UCG_Tokens::get_seo_profile_options(true) : array();
+                $fields = array();
+                foreach ($seo_profiles as $profile) {
+                    if (!is_array($profile) || empty($profile['value'])) {
+                        continue;
+                    }
+                    $profile_value = sanitize_key((string) $profile['value']);
+                    if ($profile_value === '') {
+                        continue;
+                    }
+                    $profile_label = isset($profile['label']) ? (string) $profile['label'] : $profile_value;
+                    $fields[] = array(
+                        'value' => 'seo:' . $profile_value,
+                        'label' => sprintf(__('SEO-пакет (%s)', 'unicontent-ai-generator'), $profile_label),
+                    );
+                }
+
+                if (!empty($fields)) {
+                    return $fields;
+                }
+
+                return array(
+                    array(
+                        'value' => 'seo:auto',
+                        'label' => __('SEO-пакет (Авто)', 'unicontent-ai-generator'),
+                    ),
+                );
+            }
+
+            return UCG_Tokens::get_target_fields_for_post_type($post_type);
         }
 
         protected function get_filter_fields_for_post_type($post_type) {

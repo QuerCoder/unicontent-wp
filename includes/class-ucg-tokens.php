@@ -218,6 +218,11 @@ if (!class_exists('UCG_Tokens')) {
                 return true;
             }
 
+            if (strpos($target_field, 'seo:') === 0) {
+                $profile = substr($target_field, 4);
+                return self::write_seo_package($post_id, $profile, $text);
+            }
+
             return new WP_Error('ucg_target_not_supported', __('Тип целевого поля не поддерживается.', 'unicontent-ai-generator'));
         }
 
@@ -247,6 +252,252 @@ if (!class_exists('UCG_Tokens')) {
             }
 
             return $fields;
+        }
+
+        public static function get_seo_profile_options($include_auto = true) {
+            $include_auto = !empty($include_auto);
+            $options = array();
+
+            if ($include_auto) {
+                $options[] = array(
+                    'value' => 'auto',
+                    'label' => __('Авто (активный SEO плагин)', 'unicontent-ai-generator'),
+                );
+            }
+
+            if (defined('WPSEO_VERSION') || class_exists('WPSEO_Meta')) {
+                $options[] = array(
+                    'value' => 'yoast',
+                    'label' => 'Yoast SEO',
+                );
+            }
+
+            if (defined('RANK_MATH_VERSION') || class_exists('RankMath')) {
+                $options[] = array(
+                    'value' => 'rank_math',
+                    'label' => 'Rank Math',
+                );
+            }
+
+            if (defined('AIOSEO_VERSION') || class_exists('AIOSEO\\Plugin\\Common\\Main\\Main') || class_exists('AIOSEO\\Plugin\\Common\\Main')) {
+                $options[] = array(
+                    'value' => 'aioseo',
+                    'label' => 'All in One SEO',
+                );
+            }
+
+            return $options;
+        }
+
+        public static function has_supported_seo_plugin() {
+            $options = self::get_seo_profile_options(false);
+            return !empty($options);
+        }
+
+        public static function get_default_seo_profile() {
+            $detected = self::detect_active_seo_profile();
+            return $detected !== '' ? $detected : 'auto';
+        }
+
+        protected static function detect_active_seo_profile() {
+            if (defined('WPSEO_VERSION') || class_exists('WPSEO_Meta')) {
+                return 'yoast';
+            }
+            if (defined('RANK_MATH_VERSION') || class_exists('RankMath')) {
+                return 'rank_math';
+            }
+            if (defined('AIOSEO_VERSION') || class_exists('AIOSEO\\Plugin\\Common\\Main\\Main') || class_exists('AIOSEO\\Plugin\\Common\\Main')) {
+                return 'aioseo';
+            }
+            return '';
+        }
+
+        protected static function resolve_seo_profile($profile) {
+            $profile = sanitize_key((string) $profile);
+            if ($profile === '' || $profile === 'auto') {
+                return self::detect_active_seo_profile();
+            }
+
+            $known = array('yoast' => true, 'rank_math' => true, 'aioseo' => true);
+            if (!isset($known[$profile])) {
+                return '';
+            }
+
+            foreach (self::get_seo_profile_options(false) as $item) {
+                if (!is_array($item) || empty($item['value'])) {
+                    continue;
+                }
+                if ((string) $item['value'] === $profile) {
+                    return $profile;
+                }
+            }
+
+            return '';
+        }
+
+        protected static function extract_json_payload($text) {
+            $text = trim((string) $text);
+            if ($text === '') {
+                return array();
+            }
+
+            $decoded = json_decode($text, true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+
+            if (preg_match('/\{[\s\S]*\}/u', $text, $match)) {
+                $decoded_fragment = json_decode((string) $match[0], true);
+                if (is_array($decoded_fragment)) {
+                    return $decoded_fragment;
+                }
+            }
+
+            return array();
+        }
+
+        protected static function parse_seo_package($text) {
+            $text = trim((string) $text);
+            $parsed = array(
+                'title' => '',
+                'description' => '',
+                'focus_keyword' => '',
+            );
+
+            $json_payload = self::extract_json_payload($text);
+            if (!empty($json_payload)) {
+                $title_keys = array('title', 'seo_title', 'meta_title');
+                $description_keys = array('description', 'meta_description', 'desc');
+                $keyword_keys = array('focus_keyword', 'keyword', 'keyphrase');
+
+                foreach ($title_keys as $key) {
+                    if (!empty($json_payload[$key])) {
+                        $parsed['title'] = self::value_to_string($json_payload[$key]);
+                        break;
+                    }
+                }
+                foreach ($description_keys as $key) {
+                    if (!empty($json_payload[$key])) {
+                        $parsed['description'] = self::value_to_string($json_payload[$key]);
+                        break;
+                    }
+                }
+                foreach ($keyword_keys as $key) {
+                    if (!empty($json_payload[$key])) {
+                        $parsed['focus_keyword'] = self::value_to_string($json_payload[$key]);
+                        break;
+                    }
+                }
+            }
+
+            if ($parsed['title'] === '' && $parsed['description'] === '') {
+                $lines = preg_split('/\r\n|\r|\n/', $text);
+                if (is_array($lines)) {
+                    foreach ($lines as $line) {
+                        $line = trim((string) $line);
+                        if ($line === '') {
+                            continue;
+                        }
+                        if ($parsed['title'] === '' && preg_match('/^(title|заголовок)\s*[:\-]\s*(.+)$/iu', $line, $match)) {
+                            $parsed['title'] = isset($match[2]) ? (string) $match[2] : '';
+                            continue;
+                        }
+                        if ($parsed['description'] === '' && preg_match('/^(description|desc|описание)\s*[:\-]\s*(.+)$/iu', $line, $match)) {
+                            $parsed['description'] = isset($match[2]) ? (string) $match[2] : '';
+                            continue;
+                        }
+                        if ($parsed['focus_keyword'] === '' && preg_match('/^(keyword|focus|keyphrase|ключ|ключевая фраза)\s*[:\-]\s*(.+)$/iu', $line, $match)) {
+                            $parsed['focus_keyword'] = isset($match[2]) ? (string) $match[2] : '';
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            if ($parsed['title'] === '' && $parsed['description'] === '' && $text !== '') {
+                $parts = preg_split('/\r\n|\r|\n/', $text, 2);
+                if (is_array($parts) && !empty($parts[0])) {
+                    $parsed['title'] = (string) $parts[0];
+                    $parsed['description'] = isset($parts[1]) ? (string) $parts[1] : '';
+                }
+            }
+
+            $parsed['title'] = trim(wp_strip_all_tags((string) $parsed['title']));
+            $parsed['description'] = trim(wp_strip_all_tags((string) $parsed['description']));
+            $parsed['focus_keyword'] = trim(wp_strip_all_tags((string) $parsed['focus_keyword']));
+
+            return $parsed;
+        }
+
+        protected static function get_seo_meta_keys($profile) {
+            $profile = sanitize_key((string) $profile);
+            switch ($profile) {
+                case 'yoast':
+                    return array(
+                        'title' => '_yoast_wpseo_title',
+                        'description' => '_yoast_wpseo_metadesc',
+                        'focus_keyword' => '_yoast_wpseo_focuskw',
+                        'og_title' => '_yoast_wpseo_opengraph-title',
+                        'og_description' => '_yoast_wpseo_opengraph-description',
+                    );
+                case 'rank_math':
+                    return array(
+                        'title' => 'rank_math_title',
+                        'description' => 'rank_math_description',
+                        'focus_keyword' => 'rank_math_focus_keyword',
+                        'og_title' => 'rank_math_twitter_title',
+                        'og_description' => 'rank_math_twitter_description',
+                    );
+                case 'aioseo':
+                    return array(
+                        'title' => '_aioseo_title',
+                        'description' => '_aioseo_description',
+                        'focus_keyword' => '_aioseo_keywords',
+                        'og_title' => '',
+                        'og_description' => '',
+                    );
+            }
+            return array();
+        }
+
+        protected static function write_seo_package($post_id, $profile, $text) {
+            $profile = self::resolve_seo_profile($profile);
+            if ($profile === '') {
+                return new WP_Error('ucg_seo_provider_missing', __('Не найден активный SEO плагин для записи тегов.', 'unicontent-ai-generator'));
+            }
+
+            $parsed = self::parse_seo_package($text);
+            $title = isset($parsed['title']) ? (string) $parsed['title'] : '';
+            $description = isset($parsed['description']) ? (string) $parsed['description'] : '';
+            $focus_keyword = isset($parsed['focus_keyword']) ? (string) $parsed['focus_keyword'] : '';
+
+            if ($title === '' && $description === '' && $focus_keyword === '') {
+                return new WP_Error('ucg_seo_payload_empty', __('Не удалось извлечь SEO поля из ответа модели.', 'unicontent-ai-generator'));
+            }
+
+            $meta_keys = self::get_seo_meta_keys($profile);
+            if (empty($meta_keys)) {
+                return new WP_Error('ucg_seo_profile_invalid', __('Некорректный SEO профиль.', 'unicontent-ai-generator'));
+            }
+
+            if (!empty($meta_keys['title']) && $title !== '') {
+                update_post_meta($post_id, $meta_keys['title'], $title);
+            }
+            if (!empty($meta_keys['description']) && $description !== '') {
+                update_post_meta($post_id, $meta_keys['description'], $description);
+            }
+            if (!empty($meta_keys['focus_keyword']) && $focus_keyword !== '') {
+                update_post_meta($post_id, $meta_keys['focus_keyword'], $focus_keyword);
+            }
+
+            if (!empty($meta_keys['og_title']) && $title !== '') {
+                update_post_meta($post_id, $meta_keys['og_title'], $title);
+            }
+            if (!empty($meta_keys['og_description']) && $description !== '') {
+                update_post_meta($post_id, $meta_keys['og_description'], $description);
+            }
+
+            return true;
         }
 
         public static function get_field_value_for_preview($post_id, $target_field) {
@@ -280,6 +531,26 @@ if (!class_exists('UCG_Tokens')) {
                     return self::value_to_string(get_field($acf_name, $post_id));
                 }
                 return self::value_to_string(get_post_meta($post_id, $acf_name, true));
+            }
+
+            if (strpos($target_field, 'seo:') === 0) {
+                $profile = substr($target_field, 4);
+                $profile = self::resolve_seo_profile($profile);
+                $meta_keys = self::get_seo_meta_keys($profile);
+                if (empty($meta_keys)) {
+                    return '';
+                }
+                $title = !empty($meta_keys['title']) ? self::value_to_string(get_post_meta($post_id, $meta_keys['title'], true)) : '';
+                $description = !empty($meta_keys['description']) ? self::value_to_string(get_post_meta($post_id, $meta_keys['description'], true)) : '';
+
+                $parts = array();
+                if ($title !== '') {
+                    $parts[] = __('Title:', 'unicontent-ai-generator') . ' ' . $title;
+                }
+                if ($description !== '') {
+                    $parts[] = __('Description:', 'unicontent-ai-generator') . ' ' . $description;
+                }
+                return implode(' ', $parts);
             }
 
             return '';

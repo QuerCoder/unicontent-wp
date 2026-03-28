@@ -267,28 +267,51 @@ body.ucg-review-modal-open {
 }
 
 .ucg-scenario-card {
+    position: relative;
+    display: block;
+    cursor: pointer;
+}
+
+.ucg-scenario-card__input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.ucg-scenario-card__surface {
     display: grid;
     grid-template-columns: auto 1fr auto;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     border: 1px solid var(--ucg-border);
-    border-radius: 14px;
-    min-height: 52px;
-    padding: 10px 12px;
-    background: #fffdf9;
-    cursor: pointer;
-    transition: border-color .16s ease, box-shadow .16s ease, background-color .16s ease;
+    border-radius: 16px;
+    min-height: 74px;
+    padding: 12px 14px;
+    background: linear-gradient(165deg, #fff 0%, #fff8f2 100%);
+    transition: border-color .16s ease, box-shadow .16s ease, background-color .16s ease, transform .16s ease;
 }
 
-.ucg-scenario-card input[type="radio"] {
-    margin: 0;
+.ucg-scenario-card:not(.is-disabled):hover .ucg-scenario-card__surface {
+    border-color: rgba(240, 106, 54, 0.44);
+    transform: translateY(-1px);
 }
 
 .ucg-scenario-card__icon {
-    font-size: 18px;
-    width: 18px;
-    height: 18px;
-    color: var(--ucg-text-secondary);
+    font-size: 20px;
+    width: 20px;
+    height: 20px;
+    color: var(--ucg-accent-strong);
+}
+
+.ucg-scenario-card__content {
+    display: grid;
+    gap: 4px;
+}
+
+.ucg-scenario-card__label,
+.ucg-scenario-card__desc {
+    display: block;
 }
 
 .ucg-scenario-card__label {
@@ -296,20 +319,35 @@ body.ucg-review-modal-open {
     color: var(--ucg-text-primary);
 }
 
+.ucg-scenario-card__desc {
+    font-size: 12px;
+    color: var(--ucg-text-secondary);
+    line-height: 1.25;
+}
+
 .ucg-scenario-card__meta {
     font-size: 11px;
     color: var(--ucg-text-muted);
+    background: rgba(24, 32, 42, 0.08);
+    border-radius: 999px;
+    padding: 4px 8px;
+    line-height: 1;
+    white-space: nowrap;
 }
 
-.ucg-scenario-card.is-selected {
+.ucg-scenario-card.is-selected .ucg-scenario-card__surface {
     border-color: rgba(240, 106, 54, 0.62);
     box-shadow: 0 0 0 3px rgba(240, 106, 54, 0.12);
     background: #fff;
 }
 
 .ucg-scenario-card.is-disabled {
-    opacity: .62;
     cursor: not-allowed;
+}
+
+.ucg-scenario-card.is-disabled .ucg-scenario-card__surface {
+    opacity: .62;
+    background: #f9f3ec;
 }
 
 .ucg-model-controls {

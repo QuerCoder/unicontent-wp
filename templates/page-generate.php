@@ -17,7 +17,7 @@
             <div class="ucg-stepper">
                 <button type="button" class="ucg-stepper__item is-active" data-step-target="1">
                     <span class="ucg-stepper__num">1</span>
-                    <span class="ucg-stepper__label">Сценарий и тип</span>
+                    <span class="ucg-stepper__label">Сценарий</span>
                 </button>
                 <button type="button" class="ucg-stepper__item" data-step-target="2">
                     <span class="ucg-stepper__num">2</span>
@@ -25,7 +25,7 @@
                 </button>
                 <button type="button" class="ucg-stepper__item" data-step-target="3">
                     <span class="ucg-stepper__num">3</span>
-                    <span class="ucg-stepper__label">Шаблон и запуск</span>
+                    <span class="ucg-stepper__label">Запуск</span>
                 </button>
             </div>
 
@@ -39,6 +39,7 @@
                                 $scenario_value = isset($scenario_item['value']) ? sanitize_key((string) $scenario_item['value']) : '';
                                 $scenario_label = isset($scenario_item['label']) ? (string) $scenario_item['label'] : $scenario_value;
                                 $scenario_icon = isset($scenario_item['icon']) ? (string) $scenario_item['icon'] : 'dashicons-admin-generic';
+                                $scenario_description = isset($scenario_item['description']) ? trim((string) $scenario_item['description']) : '';
                                 $scenario_available = !empty($scenario_item['is_available']);
                                 if ($scenario_value === '') {
                                     continue;
@@ -46,24 +47,36 @@
                                 ?>
                                 <label class="ucg-scenario-card<?php echo $scenario_available ? '' : ' is-disabled'; ?>">
                                     <input
+                                        class="ucg-scenario-card__input"
                                         type="radio"
                                         name="ucg-wizard-scenario"
                                         value="<?php echo esc_attr($scenario_value); ?>"
                                         <?php checked((string) $scenario, $scenario_value); ?>
                                         <?php disabled(!$scenario_available); ?>
                                     >
-                                    <span class="ucg-scenario-card__icon dashicons <?php echo esc_attr($scenario_icon); ?>" aria-hidden="true"></span>
-                                    <span class="ucg-scenario-card__label"><?php echo esc_html($scenario_label); ?></span>
-                                    <?php if (!$scenario_available) : ?>
-                                        <span class="ucg-scenario-card__meta">Скоро</span>
-                                    <?php endif; ?>
+                                    <span class="ucg-scenario-card__surface">
+                                        <span class="ucg-scenario-card__icon dashicons <?php echo esc_attr($scenario_icon); ?>" aria-hidden="true"></span>
+                                        <span class="ucg-scenario-card__content">
+                                            <span class="ucg-scenario-card__label"><?php echo esc_html($scenario_label); ?></span>
+                                            <?php if ($scenario_description !== '') : ?>
+                                                <span class="ucg-scenario-card__desc"><?php echo esc_html($scenario_description); ?></span>
+                                            <?php endif; ?>
+                                        </span>
+                                        <?php if (!$scenario_available) : ?>
+                                            <span class="ucg-scenario-card__meta">Скоро</span>
+                                        <?php endif; ?>
+                                    </span>
                                 </label>
                             <?php endforeach; ?>
                         <?php else : ?>
                             <label class="ucg-scenario-card">
-                                <input type="radio" name="ucg-wizard-scenario" value="field_update" checked>
-                                <span class="ucg-scenario-card__icon dashicons dashicons-edit-page" aria-hidden="true"></span>
-                                <span class="ucg-scenario-card__label">Поля</span>
+                                <input class="ucg-scenario-card__input" type="radio" name="ucg-wizard-scenario" value="field_update" checked>
+                                <span class="ucg-scenario-card__surface">
+                                    <span class="ucg-scenario-card__icon dashicons dashicons-edit-page" aria-hidden="true"></span>
+                                    <span class="ucg-scenario-card__content">
+                                        <span class="ucg-scenario-card__label">Поля</span>
+                                    </span>
+                                </span>
                             </label>
                         <?php endif; ?>
                     </div>
@@ -82,7 +95,7 @@
                     </label>
 
                     <label class="ucg-field">
-                        <span>Целевое поле</span>
+                        <span id="ucg-wizard-target-field-label"><?php echo esc_html(isset($target_field_label) ? $target_field_label : 'Целевое поле'); ?></span>
                         <select
                             id="ucg-wizard-target-field"
                             class="ucg-enhanced-select"

@@ -870,6 +870,7 @@ jQuery(function ($) {
         const $scenarioInputs = $('input[name="ucg-wizard-scenario"]');
         const $postType = $('#ucg-wizard-post-type');
         const $targetField = $('#ucg-wizard-target-field');
+        const $targetFieldLabel = $('#ucg-wizard-target-field-label');
         const $templateSelect = $('#ucg-wizard-template');
         const $templateName = $('#ucg-wizard-template-name');
         const $templateNameWrap = $('#ucg-template-name-wrap');
@@ -1139,6 +1140,12 @@ jQuery(function ($) {
             ];
             const sourceFields = fields.length ? fields : fallbackFields;
             const currentValue = String($targetField.val() || '');
+            if ($targetFieldLabel.length) {
+                const targetLabel = state.schema && state.schema.target_field_label
+                    ? String(state.schema.target_field_label)
+                    : jsT('Целевое поле');
+                $targetFieldLabel.text(targetLabel);
+            }
             let html = jsT('<option value="">Выберите поле</option>');
             sourceFields.forEach(function (field) {
                 const value = field && field.value ? String(field.value) : '';

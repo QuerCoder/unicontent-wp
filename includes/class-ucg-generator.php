@@ -163,6 +163,7 @@ if (!class_exists('UCG_Generator')) {
             $length_option_id = 0;
             $vary_length = 0;
             $model = 'auto';
+            $scenario = 'field_update';
 
             if ($item_id <= 0 || $post_id <= 0 || $run_id <= 0) {
                 return new WP_Error('ucg_invalid_queue_item', __('Некорректный элемент очереди.', 'unicontent-ai-generator'));
@@ -174,6 +175,10 @@ if (!class_exists('UCG_Generator')) {
                     $template_body = (string) $options['template_body'];
                 }
                 if (is_array($options)) {
+                    $scenario = isset($options['scenario']) ? sanitize_key((string) $options['scenario']) : 'field_update';
+                    if ($scenario === '') {
+                        $scenario = 'field_update';
+                    }
                     $length_option_id = isset($options['length_option_id']) ? (int) $options['length_option_id'] : 0;
                     $vary_length = !empty($options['vary_length']) ? 1 : 0;
                     $model = isset($options['model']) ? sanitize_key((string) $options['model']) : 'auto';
@@ -215,6 +220,7 @@ if (!class_exists('UCG_Generator')) {
                 );
                 return new WP_Error('ucg_prompt_empty', __('Промпт пустой.', 'unicontent-ai-generator'));
             }
+            $prompt = $this->build_prompt_for_scenario($prompt, $scenario);
 
             $system_prompt = isset($settings['system_prompt']) ? (string) $settings['system_prompt'] : '';
             $max_tokens = isset($settings['max_tokens']) ? (int) $settings['max_tokens'] : 1500;
@@ -290,6 +296,21 @@ if (!class_exists('UCG_Generator')) {
             UCG_DB::update_run_item($item_id, $update_data);
 
             return true;
+        }
+
+        protected function build_prompt_for_scenario($prompt, $scenario) {
+            $prompt = (string) $prompt;
+            $scenario = sanitize_key((string) $scenario);
+
+            if ($scenario !== 'seo_tags') {
+                return $prompt;
+            }
+
+            $instruction = "Верни только JSON без markdown и комментариев. Формат: "
+                . "{\"title\":\"...\",\"description\":\"...\",\"focus_keyword\":\"...\"}. "
+                . "title и description обязательны.";
+
+            return $prompt . "\n\n" . $instruction;
         }
 
         protected function is_fatal_api_error(WP_Error $error) {
