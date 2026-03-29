@@ -271,6 +271,20 @@
                     </div>
                 </div>
 
+                <div class="ucg-date-range-block" id="ucg-publish-date-range-wrap" hidden>
+                    <div class="ucg-grid-2 ucg-date-range-grid">
+                        <label class="ucg-field">
+                            <span>Дата публикации: от</span>
+                            <input type="date" id="ucg-wizard-publish-date-from">
+                        </label>
+                        <label class="ucg-field">
+                            <span>Дата публикации: до</span>
+                            <input type="date" id="ucg-wizard-publish-date-to">
+                        </label>
+                    </div>
+                    <p class="ucg-muted ucg-field-hint">Для комментариев и отзывов: если диапазон не задан, используется текущее время и дата.</p>
+                </div>
+
                 <div id="ucg-template-body-standard-wrap">
                     <label class="ucg-field">
                         <span>Текст шаблона</span>

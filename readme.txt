@@ -4,7 +4,7 @@ Tags: ai, content generation, seo, woocommerce, ecommerce
 Requires at least: 5.8
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 0.2.9.0
+Stable tag: 0.2.9.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -46,6 +46,13 @@ Yes. Use generation mode with review workflow and approve/reject in bulk.
 Russian and English are supported in the admin interface.
 
 == Changelog ==
+
+= 0.2.9.1 =
+
+* Added publish date range in Generate wizard for comments and WooCommerce reviews
+* Date range now supports random publish datetime between two selected dates
+* If date range is empty, comments/reviews are published with current date and time
+* Passed publish-date context through queue publish mode and review approve action
 
 = 0.2.9.0 =
 

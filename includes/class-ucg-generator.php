@@ -166,6 +166,8 @@ if (!class_exists('UCG_Generator')) {
             $scenario = 'field_update';
             $seo_title_prompt_template = '';
             $seo_description_prompt_template = '';
+            $publish_date_from = '';
+            $publish_date_to = '';
 
             if ($item_id <= 0 || $post_id <= 0 || $run_id <= 0) {
                 return new WP_Error('ucg_invalid_queue_item', __('Некорректный элемент очереди.', 'unicontent-ai-generator'));
@@ -189,6 +191,8 @@ if (!class_exists('UCG_Generator')) {
                     if ($model === '') {
                         $model = 'auto';
                     }
+                    $publish_date_from = isset($options['publish_date_from']) ? (string) $options['publish_date_from'] : '';
+                    $publish_date_to = isset($options['publish_date_to']) ? (string) $options['publish_date_to'] : '';
                 }
             }
 
@@ -207,6 +211,7 @@ if (!class_exists('UCG_Generator')) {
             if (!in_array($generation_mode, array('review', 'publish'), true)) {
                 $generation_mode = 'review';
             }
+            $write_context = $this->build_write_context($scenario, $publish_date_from, $publish_date_to);
 
             if ($scenario === 'seo_tags') {
                 if ($seo_title_prompt_template === '' && $seo_description_prompt_template === '' && $template_body !== '') {
@@ -332,7 +337,7 @@ if (!class_exists('UCG_Generator')) {
 
                 if ($generation_mode === 'publish') {
                     $target_field = isset($item['target_field']) ? (string) $item['target_field'] : '';
-                    $write_result = UCG_Tokens::write_generated_value($post_id, $target_field, $generated_text);
+                    $write_result = UCG_Tokens::write_generated_value($post_id, $target_field, $generated_text, $write_context);
                     if (is_wp_error($write_result)) {
                         UCG_DB::update_run_item(
                             $item_id,
@@ -425,7 +430,7 @@ if (!class_exists('UCG_Generator')) {
 
             if ($generation_mode === 'publish') {
                 $target_field = isset($item['target_field']) ? (string) $item['target_field'] : '';
-                $write_result = UCG_Tokens::write_generated_value($post_id, $target_field, $generated_text);
+                $write_result = UCG_Tokens::write_generated_value($post_id, $target_field, $generated_text, $write_context);
                 if (is_wp_error($write_result)) {
                     UCG_DB::update_run_item(
                         $item_id,
@@ -466,6 +471,48 @@ if (!class_exists('UCG_Generator')) {
             }
 
             return $prompt;
+        }
+
+        protected function build_write_context($scenario, $publish_date_from, $publish_date_to) {
+            $scenario = sanitize_key((string) $scenario);
+            if ($scenario !== 'comments' && $scenario !== 'woo_reviews') {
+                return array();
+            }
+
+            $date_from = $this->normalize_publish_date_value($publish_date_from);
+            $date_to = $this->normalize_publish_date_value($publish_date_to);
+
+            if ($date_from !== '' && $date_to === '') {
+                $date_to = $date_from;
+            } elseif ($date_to !== '' && $date_from === '') {
+                $date_from = $date_to;
+            }
+
+            if ($date_from === '' || $date_to === '') {
+                return array();
+            }
+
+            if (strcmp($date_from, $date_to) > 0) {
+                $tmp = $date_from;
+                $date_from = $date_to;
+                $date_to = $tmp;
+            }
+
+            return array(
+                'publish_date_from' => $date_from,
+                'publish_date_to' => $date_to,
+            );
+        }
+
+        protected function normalize_publish_date_value($value) {
+            $value = trim((string) $value);
+            if ($value === '') {
+                return '';
+            }
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+                return '';
+            }
+            return $value;
         }
 
         protected function build_prompt_for_single_seo_field($prompt, $field) {

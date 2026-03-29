@@ -1058,6 +1058,9 @@ jQuery(function ($) {
         const $templateBody = $('#ucg-wizard-template-body');
         const $templateBodySeoTitle = $('#ucg-wizard-template-body-seo-title');
         const $templateBodySeoDescription = $('#ucg-wizard-template-body-seo-description');
+        const $publishDateRangeWrap = $('#ucg-publish-date-range-wrap');
+        const $publishDateFrom = $('#ucg-wizard-publish-date-from');
+        const $publishDateTo = $('#ucg-wizard-publish-date-to');
         const $tokens = $('#ucg-wizard-tokens');
         const $filterRows = $('#ucg-filter-rows');
         const $previewBody = $('#ucg-preview-tbody');
@@ -1091,6 +1094,67 @@ jQuery(function ($) {
             return state.scenario;
         }
 
+        function scenarioSupportsPublishDateRange(scenario) {
+            const normalized = String(scenario || '').trim();
+            return normalized === 'comments' || normalized === 'woo_reviews';
+        }
+
+        function normalizeDateInputValue(value) {
+            const normalized = String(value || '').trim();
+            if (!normalized) {
+                return '';
+            }
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+                return '';
+            }
+            return normalized;
+        }
+
+        function togglePublishDateRangeControls(scenario) {
+            const enabled = scenarioSupportsPublishDateRange(scenario);
+            if ($publishDateRangeWrap.length) {
+                $publishDateRangeWrap.prop('hidden', !enabled).toggle(enabled);
+            }
+            if (!enabled) {
+                $publishDateFrom.val('');
+                $publishDateTo.val('');
+            }
+        }
+
+        function collectPublishDateRangeForRun(scenario) {
+            if (!scenarioSupportsPublishDateRange(scenario)) {
+                return { valid: true, from: '', to: '' };
+            }
+
+            const rawFrom = String($publishDateFrom.val() || '').trim();
+            const rawTo = String($publishDateTo.val() || '').trim();
+            let dateFrom = normalizeDateInputValue(rawFrom);
+            let dateTo = normalizeDateInputValue(rawTo);
+
+            if (rawFrom && !dateFrom) {
+                return { valid: false, message: jsT('Некорректная дата "от". Используйте формат YYYY-MM-DD.') };
+            }
+            if (rawTo && !dateTo) {
+                return { valid: false, message: jsT('Некорректная дата "до". Используйте формат YYYY-MM-DD.') };
+            }
+
+            if (dateFrom && !dateTo) {
+                dateTo = dateFrom;
+            } else if (!dateFrom && dateTo) {
+                dateFrom = dateTo;
+            }
+
+            if (dateFrom && dateTo && dateFrom > dateTo) {
+                return { valid: false, message: jsT('Дата "от" не может быть больше даты "до".') };
+            }
+
+            return {
+                valid: true,
+                from: dateFrom || '',
+                to: dateTo || ''
+            };
+        }
+
         function activeTemplateInput() {
             if ($activeTemplateTextarea && $activeTemplateTextarea.length && $activeTemplateTextarea.is(':visible')) {
                 return $activeTemplateTextarea;
@@ -1118,6 +1182,7 @@ jQuery(function ($) {
             } else {
                 $activeTemplateTextarea = $templateBody;
             }
+            togglePublishDateRangeControls(scenario);
         }
 
         function setRunStatus(message, isError) {
@@ -1932,6 +1997,7 @@ jQuery(function ($) {
             const lengthOptionId = Number($lengthOption.val() || 0);
             const model = String($modelSelect.val() || state.defaultModel || 'auto');
             const varyLength = $varyLength.is(':checked') ? 1 : 0;
+            const publishDateRange = collectPublishDateRangeForRun(scenario);
 
             if (!postType) {
                 setRunStatus(jsT('Выберите тип записей.'), true);
@@ -1942,6 +2008,11 @@ jQuery(function ($) {
             if (!targetField) {
                 setRunStatus(jsT('Выберите целевое поле.'), true);
                 switchStep(1);
+                return;
+            }
+
+            if (!publishDateRange.valid) {
+                setRunStatus(publishDateRange.message || jsT('Проверьте диапазон дат публикации.'), true);
                 return;
             }
 
@@ -1989,6 +2060,8 @@ jQuery(function ($) {
                 template_body_seo_description: templateBodySeoDescription,
                 length_option_id: lengthOptionId,
                 vary_length: varyLength,
+                publish_date_from: publishDateRange.from,
+                publish_date_to: publishDateRange.to,
                 save_template: $saveTemplateChanges.is(':checked') ? 1 : 0,
                 selection_mode: mode,
                 selected_ids: JSON.stringify(Array.from(state.selectedIds)),

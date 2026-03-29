@@ -168,9 +168,10 @@ if (!class_exists('UCG_Tokens')) {
             return is_string($rendered) ? $rendered : '';
         }
 
-        public static function write_generated_value($post_id, $target_field, $text) {
+        public static function write_generated_value($post_id, $target_field, $text, $context = array()) {
             $post_id = (int) $post_id;
             $text = (string) $text;
+            $context = is_array($context) ? $context : array();
             $target_field = self::normalize_field($target_field);
             if ($post_id <= 0 || $target_field === '') {
                 return new WP_Error('ucg_invalid_target', __('Некорректное целевое поле.', 'unicontent-ai-generator'));
@@ -228,25 +229,25 @@ if (!class_exists('UCG_Tokens')) {
             }
 
             if (strpos($target_field, 'comment:') === 0) {
-                return self::write_generated_comment($post_id, $text);
+                return self::write_generated_comment($post_id, $text, $context);
             }
 
             if (strpos($target_field, 'woo_review:') === 0) {
-                return self::write_generated_woo_review($post_id, $text);
+                return self::write_generated_woo_review($post_id, $text, $context);
             }
 
             return new WP_Error('ucg_target_not_supported', __('Тип целевого поля не поддерживается.', 'unicontent-ai-generator'));
         }
 
-        protected static function write_generated_comment($post_id, $text) {
+        protected static function write_generated_comment($post_id, $text, $context = array()) {
             if (!post_type_supports(get_post_type($post_id), 'comments')) {
                 return new WP_Error('ucg_comments_not_supported', __('Этот тип записи не поддерживает комментарии.', 'unicontent-ai-generator'));
             }
             $payload = self::parse_generated_comment_payload($text, false);
-            return self::insert_generated_comment($post_id, $payload, 'comment');
+            return self::insert_generated_comment($post_id, $payload, 'comment', $context);
         }
 
-        protected static function write_generated_woo_review($post_id, $text) {
+        protected static function write_generated_woo_review($post_id, $text, $context = array()) {
             if (!self::has_woocommerce_support()) {
                 return new WP_Error('ucg_woo_missing', __('WooCommerce не активен.', 'unicontent-ai-generator'));
             }
@@ -256,7 +257,7 @@ if (!class_exists('UCG_Tokens')) {
             }
 
             $payload = self::parse_generated_comment_payload($text, true);
-            return self::insert_generated_comment($post_id, $payload, 'review');
+            return self::insert_generated_comment($post_id, $payload, 'review', $context);
         }
 
         protected static function parse_generated_comment_payload($text, $is_review = false) {
@@ -356,10 +357,11 @@ if (!class_exists('UCG_Tokens')) {
             return $rating;
         }
 
-        protected static function insert_generated_comment($post_id, $payload, $comment_type = 'comment') {
+        protected static function insert_generated_comment($post_id, $payload, $comment_type = 'comment', $context = array()) {
             $post_id = (int) $post_id;
             $comment_type = sanitize_key((string) $comment_type);
             $payload = is_array($payload) ? $payload : array();
+            $context = is_array($context) ? $context : array();
 
             $content = isset($payload['content']) ? trim((string) $payload['content']) : '';
             if ($post_id <= 0 || $content === '') {
@@ -375,6 +377,8 @@ if (!class_exists('UCG_Tokens')) {
                 $author_email = 'noreply+' . $post_id . '+' . wp_generate_password(6, false, false) . '@example.local';
             }
 
+            $publish_dates = self::resolve_comment_publish_dates($context);
+
             $comment_id = wp_insert_comment(
                 array(
                     'comment_post_ID' => $post_id,
@@ -385,6 +389,8 @@ if (!class_exists('UCG_Tokens')) {
                     'comment_approved' => 1,
                     'comment_author_url' => '',
                     'user_id' => 0,
+                    'comment_date' => isset($publish_dates['local']) ? (string) $publish_dates['local'] : current_time('mysql'),
+                    'comment_date_gmt' => isset($publish_dates['gmt']) ? (string) $publish_dates['gmt'] : current_time('mysql', true),
                 )
             );
 
@@ -401,6 +407,52 @@ if (!class_exists('UCG_Tokens')) {
             }
 
             return true;
+        }
+
+        protected static function resolve_comment_publish_dates($context) {
+            $context = is_array($context) ? $context : array();
+            $date_from = isset($context['publish_date_from']) ? self::normalize_publish_date((string) $context['publish_date_from']) : '';
+            $date_to = isset($context['publish_date_to']) ? self::normalize_publish_date((string) $context['publish_date_to']) : '';
+
+            if ($date_from !== '' && $date_to !== '') {
+                try {
+                    $timezone = wp_timezone();
+                    $start = new DateTimeImmutable($date_from . ' 00:00:00', $timezone);
+                    $end = new DateTimeImmutable($date_to . ' 23:59:59', $timezone);
+                    $start_ts = $start->getTimestamp();
+                    $end_ts = $end->getTimestamp();
+                    if ($end_ts < $start_ts) {
+                        $tmp = $start_ts;
+                        $start_ts = $end_ts;
+                        $end_ts = $tmp;
+                    }
+                    $random_ts = wp_rand($start_ts, $end_ts);
+                    $local = wp_date('Y-m-d H:i:s', $random_ts, $timezone);
+                    return array(
+                        'local' => $local,
+                        'gmt' => get_gmt_from_date($local),
+                    );
+                } catch (Exception $e) {
+                    // Fallback to current time below.
+                }
+            }
+
+            $local_now = current_time('mysql');
+            return array(
+                'local' => $local_now,
+                'gmt' => get_gmt_from_date($local_now),
+            );
+        }
+
+        protected static function normalize_publish_date($value) {
+            $value = trim((string) $value);
+            if ($value === '') {
+                return '';
+            }
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+                return '';
+            }
+            return $value;
         }
 
         protected static function get_known_seo_target_fields() {

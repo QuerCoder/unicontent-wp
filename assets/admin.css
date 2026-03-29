@@ -257,6 +257,7 @@ body.ucg-review-modal-open {
 .ucg-field input[type="text"],
 .ucg-field input[type="url"],
 .ucg-field input[type="number"],
+.ucg-field input[type="date"],
 .ucg-field select,
 .ucg-field textarea,
 .ucg-filter-row input[type="text"],
@@ -379,6 +380,18 @@ body.ucg-review-modal-open {
 
 .ucg-model-controls {
     margin-top: 10px;
+}
+
+.ucg-date-range-block {
+    max-width: 680px;
+    margin-top: 4px;
+    display: grid;
+    gap: 6px;
+}
+
+.ucg-date-range-grid {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+    align-items: start;
 }
 
 .ucg-model-unit-hint-wrap {

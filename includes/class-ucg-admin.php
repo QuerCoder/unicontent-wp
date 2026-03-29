@@ -554,6 +554,7 @@ if (!class_exists('UCG_Admin')) {
             $success = 0;
             $failed = 0;
             $touched_runs = array();
+            $write_context_by_run = array();
 
             foreach ($item_ids as $item_id) {
                 $item = UCG_DB::get_run_item_with_run($item_id);
@@ -564,7 +565,19 @@ if (!class_exists('UCG_Admin')) {
                 $touched_runs[] = (int) $item['run_id'];
 
                 if ($action === 'approve') {
-                    $write_result = UCG_Tokens::write_generated_value((int) $item['post_id'], (string) $item['target_field'], (string) $item['generated_text']);
+                    $item_run_id = isset($item['run_id']) ? (int) $item['run_id'] : 0;
+                    if (!array_key_exists($item_run_id, $write_context_by_run)) {
+                        $write_context_by_run[$item_run_id] = $this->get_write_context_for_run($item_run_id);
+                    }
+                    $write_context = isset($write_context_by_run[$item_run_id]) && is_array($write_context_by_run[$item_run_id])
+                        ? $write_context_by_run[$item_run_id]
+                        : array();
+                    $write_result = UCG_Tokens::write_generated_value(
+                        (int) $item['post_id'],
+                        (string) $item['target_field'],
+                        (string) $item['generated_text'],
+                        $write_context
+                    );
                     if (is_wp_error($write_result)) {
                         UCG_DB::update_run_item(
                             $item_id,
@@ -1022,6 +1035,8 @@ if (!class_exists('UCG_Admin')) {
             }
             $save_template = !empty($_POST['save_template']) ? 1 : 0;
             $vary_length = !empty($_POST['vary_length']) ? 1 : 0;
+            $publish_date_from = '';
+            $publish_date_to = '';
 
             if ($post_type === '' || !post_type_exists($post_type)) {
                 wp_send_json_error(array('message' => __('Некорректный post type.', 'unicontent-ai-generator')));
@@ -1034,6 +1049,17 @@ if (!class_exists('UCG_Admin')) {
             }
             if ($scenario === 'comments' && !post_type_supports($post_type, 'comments')) {
                 wp_send_json_error(array('message' => __('Выбранный тип записей не поддерживает комментарии.', 'unicontent-ai-generator')));
+            }
+            if ($this->scenario_supports_publish_date_range($scenario)) {
+                $publish_date_range = $this->normalize_publish_date_range(
+                    $this->get_request_string($_POST, 'publish_date_from', ''),
+                    $this->get_request_string($_POST, 'publish_date_to', '')
+                );
+                if (is_wp_error($publish_date_range)) {
+                    wp_send_json_error(array('message' => $publish_date_range->get_error_message()));
+                }
+                $publish_date_from = isset($publish_date_range['from']) ? (string) $publish_date_range['from'] : '';
+                $publish_date_to = isset($publish_date_range['to']) ? (string) $publish_date_range['to'] : '';
             }
 
             $schema = $this->build_wizard_schema($post_type, false, $scenario);
@@ -1182,6 +1208,8 @@ if (!class_exists('UCG_Admin')) {
                 'seo_description_prompt' => $scenario === 'seo_tags' ? $template_body_seo_description : '',
                 'length_option_id' => $length_option_id,
                 'vary_length' => $vary_length,
+                'publish_date_from' => $publish_date_from,
+                'publish_date_to' => $publish_date_to,
             );
 
             $run_id = UCG_DB::create_run($post_type, $target_field, $active_template_id, get_current_user_id(), $options);
@@ -2791,6 +2819,100 @@ if (!class_exists('UCG_Admin')) {
                 return 0;
             }
             return $first_id;
+        }
+
+        protected function scenario_supports_publish_date_range($scenario) {
+            $scenario = sanitize_key((string) $scenario);
+            return $scenario === 'comments' || $scenario === 'woo_reviews';
+        }
+
+        protected function get_write_context_for_run($run_id) {
+            $run_id = (int) $run_id;
+            if ($run_id <= 0) {
+                return array();
+            }
+
+            $run = UCG_DB::get_run($run_id);
+            if (!is_array($run)) {
+                return array();
+            }
+
+            $options_json = isset($run['options_json']) ? (string) $run['options_json'] : '';
+            if ($options_json === '') {
+                return array();
+            }
+
+            $options = json_decode($options_json, true);
+            if (!is_array($options)) {
+                return array();
+            }
+
+            $scenario = isset($options['scenario']) ? sanitize_key((string) $options['scenario']) : self::DEFAULT_GENERATION_SCENARIO;
+            if (!$this->scenario_supports_publish_date_range($scenario)) {
+                return array();
+            }
+
+            $date_range = $this->normalize_publish_date_range(
+                isset($options['publish_date_from']) ? (string) $options['publish_date_from'] : '',
+                isset($options['publish_date_to']) ? (string) $options['publish_date_to'] : ''
+            );
+            if (is_wp_error($date_range)) {
+                return array();
+            }
+
+            $date_from = isset($date_range['from']) ? (string) $date_range['from'] : '';
+            $date_to = isset($date_range['to']) ? (string) $date_range['to'] : '';
+            if ($date_from === '' || $date_to === '') {
+                return array();
+            }
+
+            return array(
+                'publish_date_from' => $date_from,
+                'publish_date_to' => $date_to,
+            );
+        }
+
+        protected function normalize_publish_date_range($raw_from, $raw_to) {
+            $raw_from = trim((string) $raw_from);
+            $raw_to = trim((string) $raw_to);
+
+            $date_from = $this->normalize_publish_date_value($raw_from);
+            $date_to = $this->normalize_publish_date_value($raw_to);
+
+            if ($raw_from !== '' && $date_from === '') {
+                return new WP_Error('ucg_invalid_publish_date_from', __('Некорректная дата "от". Используйте формат YYYY-MM-DD.', 'unicontent-ai-generator'));
+            }
+            if ($raw_to !== '' && $date_to === '') {
+                return new WP_Error('ucg_invalid_publish_date_to', __('Некорректная дата "до". Используйте формат YYYY-MM-DD.', 'unicontent-ai-generator'));
+            }
+
+            if ($date_from !== '' && $date_to === '') {
+                $date_to = $date_from;
+            } elseif ($date_to !== '' && $date_from === '') {
+                $date_from = $date_to;
+            }
+
+            if ($date_from !== '' && $date_to !== '' && strcmp($date_from, $date_to) > 0) {
+                return new WP_Error('ucg_invalid_publish_date_range', __('Дата "от" не может быть больше даты "до".', 'unicontent-ai-generator'));
+            }
+
+            return array(
+                'from' => $date_from,
+                'to' => $date_to,
+            );
+        }
+
+        protected function normalize_publish_date_value($value) {
+            $value = trim((string) $value);
+            if ($value === '') {
+                return '';
+            }
+
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+                return '';
+            }
+
+            return $value;
         }
 
         protected function build_menu_counter_badge($count) {
