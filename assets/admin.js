@@ -341,6 +341,31 @@ jQuery(function ($) {
         $select.trigger('change');
     }
 
+    function getEnhancedSelectValue($select) {
+        if (!$select || !$select.length) {
+            return '';
+        }
+
+        const el = $select.get(0);
+        if (el && el.tomselect) {
+            const value = el.tomselect.getValue();
+            return String(value == null ? '' : value);
+        }
+
+        return String($select.val() || '');
+    }
+
+    function destroyEnhancedSelectInstance($select) {
+        if (!$select || !$select.length) {
+            return;
+        }
+
+        const el = $select.get(0);
+        if (el && el.tomselect) {
+            el.tomselect.destroy();
+        }
+    }
+
     function initEnhancedSelects($scope) {
         const $root = ($scope && $scope.length) ? $scope : $(document);
         const $selects = $root.is('.ucg-enhanced-select') ? $root : $root.find('.ucg-enhanced-select');
@@ -1173,7 +1198,7 @@ jQuery(function ($) {
                 { value: 'post:post_excerpt', label: jsT('Краткое описание (post_excerpt)') }
             ];
             const sourceFields = fields.length ? fields : fallbackFields;
-            const currentValue = String($targetField.val() || '');
+            const currentValue = getEnhancedSelectValue($targetField);
             if ($targetFieldLabel.length) {
                 const targetLabel = state.schema && state.schema.target_field_label
                     ? String(state.schema.target_field_label)
@@ -1192,6 +1217,7 @@ jQuery(function ($) {
                 const label = field && field.label ? String(field.label) : value;
                 html += '<option value="' + escapeHtml(value) + '">' + escapeHtml(label) + '</option>';
             });
+            destroyEnhancedSelectInstance($targetField);
             $targetField.html(html);
             if (currentValue) {
                 $targetField.val(currentValue);
@@ -1208,7 +1234,7 @@ jQuery(function ($) {
 
         function renderTemplates() {
             const templates = Array.isArray(state.schema.templates) ? state.schema.templates : [];
-            const currentTemplateValue = String($templateSelect.val() || '');
+            const currentTemplateValue = getEnhancedSelectValue($templateSelect);
             const sourceTemplates = templates;
             let html = jsT('<option value="">Не выбрано</option>');
             let defaultTemplateId = 0;
@@ -1225,6 +1251,7 @@ jQuery(function ($) {
                     defaultTemplateId = id;
                 }
             });
+            destroyEnhancedSelectInstance($templateSelect);
             $templateSelect.html(html);
             if (defaultTemplateId > 0) {
                 $templateSelect.val(String(defaultTemplateId));
@@ -1280,6 +1307,7 @@ jQuery(function ($) {
                 defaultId = Number(first && first.id ? first.id : 0);
             }
 
+            destroyEnhancedSelectInstance($lengthOption);
             $lengthOption.html(html);
             if (defaultId > 0) {
                 $lengthOption.val(String(defaultId));
@@ -1362,7 +1390,7 @@ jQuery(function ($) {
         function renderGenerationModels() {
             const models = Array.isArray(state.schema.generation_models) ? state.schema.generation_models : [];
             const lengthOptionId = Number($lengthOption.val() || 0);
-            const currentModel = String($modelSelect.val() || state.defaultModel || 'auto');
+            const currentModel = getEnhancedSelectValue($modelSelect) || String(state.defaultModel || 'auto');
             let html = '';
             let selectedExists = false;
             let defaultModel = String(state.schema.default_model || state.defaultModel || 'auto');
@@ -1392,10 +1420,15 @@ jQuery(function ($) {
                 });
             }
 
+            destroyEnhancedSelectInstance($modelSelect);
             $modelSelect.html(html);
             const nextModel = selectedExists ? currentModel : defaultModel;
-            setEnhancedSelectValue($modelSelect, nextModel);
             initEnhancedSelects($modelSelect);
+            $modelSelect.val(String(nextModel));
+            const modelElement = $modelSelect.get(0);
+            if (modelElement && modelElement.tomselect) {
+                modelElement.tomselect.setValue(String(nextModel), true);
+            }
             updateModelHint();
         }
 
