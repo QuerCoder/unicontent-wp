@@ -4,7 +4,7 @@ Tags: ai, content generation, seo, woocommerce, ecommerce
 Requires at least: 5.8
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 0.2.7
+Stable tag: 0.2.9.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,13 @@ Russian and English are supported in the admin interface.
 
 == Changelog ==
 
+= 0.2.9.0 =
+
+* Added new generation scenarios: WordPress comments and WooCommerce reviews
+* Added flexible prompt blocks editor in Templates (base prompt + multiple blocks)
+* Improved SEO plugin selector behavior with unavailable plugin visibility
+* Improved scenario-aware template payload compatibility
+
 = 0.2.7 =
 
 * Added English localization support
@@ -54,4 +61,3 @@ Russian and English are supported in the admin interface.
 * Improved ready template catalog filtering
 * Fixed back link in ready template catalog
 * Standardized decimal separator output to dot
-

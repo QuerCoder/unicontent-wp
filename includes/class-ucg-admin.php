@@ -142,6 +142,17 @@ if (!class_exists('UCG_Admin')) {
             if ($editing_template && !empty($editing_template['post_type'])) {
                 $selected_post_type = sanitize_key((string) $editing_template['post_type']);
             }
+            $template_scenario_options = $this->get_generation_scenario_options();
+            $editing_template_scenario = self::DEFAULT_GENERATION_SCENARIO;
+            if ($editing_template && !empty($editing_template['scenario'])) {
+                $editing_template_scenario = $this->normalize_generation_scenario((string) $editing_template['scenario']);
+            }
+            $editing_template_payload = $this->decode_template_payload(
+                $editing_template_scenario,
+                $editing_template && isset($editing_template['body']) ? (string) $editing_template['body'] : ''
+            );
+            $editing_base_prompt = isset($editing_template_payload['base_prompt']) ? (string) $editing_template_payload['base_prompt'] : '';
+            $editing_prompt_blocks = $this->build_editor_prompt_blocks($editing_template_scenario, $editing_template_payload);
 
             $templates = UCG_DB::get_templates();
             $tokens = UCG_Tokens::get_prompt_tokens_for_post_type($selected_post_type);
@@ -281,22 +292,47 @@ if (!class_exists('UCG_Admin')) {
             $template_id = $this->get_request_int($_POST, 'template_id', 0);
             $name = sanitize_text_field($this->get_request_string($_POST, 'name', ''));
             $post_type = sanitize_key($this->get_request_string($_POST, 'post_type', ''));
-            $body = sanitize_textarea_field($this->get_request_string($_POST, 'body', ''));
+            $scenario = $this->normalize_generation_scenario(
+                $this->get_request_string($_POST, 'scenario', self::DEFAULT_GENERATION_SCENARIO)
+            );
+            $base_prompt = sanitize_textarea_field($this->get_request_string($_POST, 'base_prompt', ''));
+            $prompt_blocks = $this->parse_prompt_blocks_from_request($_POST, $scenario);
+            $derived_prompts = $this->derive_template_prompts_from_blocks($scenario, $base_prompt, $prompt_blocks);
+            $body = isset($derived_prompts['body']) ? (string) $derived_prompts['body'] : '';
+            $seo_title_prompt = isset($derived_prompts['seo_title_prompt']) ? (string) $derived_prompts['seo_title_prompt'] : '';
+            $seo_description_prompt = isset($derived_prompts['seo_description_prompt']) ? (string) $derived_prompts['seo_description_prompt'] : '';
             $is_default = !empty($_POST['is_default']) ? 1 : 0;
 
-            if ($name === '' || $post_type === '' || $body === '' || !post_type_exists($post_type)) {
-                $this->redirect_with_notice('ucg-templates', __('Заполните название, post type и текст шаблона.', 'unicontent-ai-generator'), 'error');
+            if ($name === '' || $post_type === '' || !post_type_exists($post_type)) {
+                $this->redirect_with_notice('ucg-templates', __('Заполните название и post type.', 'unicontent-ai-generator'), 'error');
             }
 
+            if ($scenario === 'seo_tags') {
+                if (count($prompt_blocks) < 2 || trim($seo_title_prompt) === '' || trim($seo_description_prompt) === '') {
+                    $this->redirect_with_notice('ucg-templates', __('Для SEO шаблона нужны блоки title и description.', 'unicontent-ai-generator'), 'error');
+                }
+            } elseif (trim($body) === '') {
+                $this->redirect_with_notice('ucg-templates', __('Добавьте хотя бы один блок промпта.', 'unicontent-ai-generator'), 'error');
+            }
+
+            $encoded_body = $this->encode_template_payload(
+                $scenario,
+                $body,
+                $seo_title_prompt,
+                $seo_description_prompt,
+                $prompt_blocks,
+                $base_prompt
+            );
+
             if ($template_id > 0) {
-                $ok = UCG_DB::update_template($template_id, $name, $post_type, $body, $is_default, 0, 0);
+                $ok = UCG_DB::update_template($template_id, $name, $post_type, $encoded_body, $is_default, 0, 0, $scenario);
                 if (!$ok) {
                     $this->redirect_with_notice('ucg-templates', __('Не удалось обновить шаблон.', 'unicontent-ai-generator'), 'error');
                 }
                 $this->redirect_with_notice('ucg-templates', __('Шаблон обновлен.', 'unicontent-ai-generator'));
             }
 
-            $created_id = UCG_DB::create_template($name, $post_type, $body, $is_default, 0, 0);
+            $created_id = UCG_DB::create_template($name, $post_type, $encoded_body, $is_default, 0, 0, $scenario);
             if ($created_id <= 0) {
                 $this->redirect_with_notice('ucg-templates', __('Не удалось создать шаблон.', 'unicontent-ai-generator'), 'error');
             }
@@ -951,6 +987,10 @@ if (!class_exists('UCG_Admin')) {
                         'body' => isset($template_payload['body']) ? (string) $template_payload['body'] : '',
                         'seo_title_prompt' => isset($template_payload['seo_title_prompt']) ? (string) $template_payload['seo_title_prompt'] : '',
                         'seo_description_prompt' => isset($template_payload['seo_description_prompt']) ? (string) $template_payload['seo_description_prompt'] : '',
+                        'base_prompt' => isset($template_payload['base_prompt']) ? (string) $template_payload['base_prompt'] : '',
+                        'prompt_blocks' => isset($template_payload['prompt_blocks']) && is_array($template_payload['prompt_blocks'])
+                            ? $template_payload['prompt_blocks']
+                            : array(),
                         'is_default' => !empty($template['is_default']),
                     ),
                     'tokens' => $tokens,
@@ -989,6 +1029,12 @@ if (!class_exists('UCG_Admin')) {
             if (!$this->is_scenario_available($scenario)) {
                 wp_send_json_error(array('message' => __('Выбранный сценарий пока недоступен.', 'unicontent-ai-generator')));
             }
+            if ($scenario === 'woo_reviews' && $post_type !== 'product') {
+                wp_send_json_error(array('message' => __('Для сценария отзывов WooCommerce выберите тип записей: Товар (product).', 'unicontent-ai-generator')));
+            }
+            if ($scenario === 'comments' && !post_type_supports($post_type, 'comments')) {
+                wp_send_json_error(array('message' => __('Выбранный тип записей не поддерживает комментарии.', 'unicontent-ai-generator')));
+            }
 
             $schema = $this->build_wizard_schema($post_type, false, $scenario);
             $allowed_models = array('auto' => true);
@@ -1011,7 +1057,7 @@ if (!class_exists('UCG_Admin')) {
             $allowed_target_fields = array();
             if (!empty($schema['target_fields']) && is_array($schema['target_fields'])) {
                 foreach ($schema['target_fields'] as $field_item) {
-                    if (!empty($field_item['value'])) {
+                    if (!empty($field_item['value']) && empty($field_item['disabled'])) {
                         $allowed_target_fields[(string) $field_item['value']] = true;
                     }
                 }
@@ -1305,6 +1351,7 @@ if (!class_exists('UCG_Admin')) {
 
         protected function get_generation_scenario_options() {
             $seo_available = class_exists('UCG_Tokens') ? UCG_Tokens::has_supported_seo_plugin() : false;
+            $woo_available = class_exists('UCG_Tokens') ? UCG_Tokens::has_woocommerce_support() : false;
             return array(
                 array(
                     'value' => 'field_update',
@@ -1321,11 +1368,18 @@ if (!class_exists('UCG_Admin')) {
                     'is_available' => $seo_available,
                 ),
                 array(
+                    'value' => 'comments',
+                    'label' => __('Комментарии', 'unicontent-ai-generator'),
+                    'icon' => 'dashicons-admin-comments',
+                    'description' => __('Генерация комментариев к выбранным записям.', 'unicontent-ai-generator'),
+                    'is_available' => true,
+                ),
+                array(
                     'value' => 'woo_reviews',
                     'label' => __('Отзывы WooCommerce', 'unicontent-ai-generator'),
                     'icon' => 'dashicons-star-filled',
                     'description' => __('Генерация отзывов к товарам WooCommerce.', 'unicontent-ai-generator'),
-                    'is_available' => false,
+                    'is_available' => $woo_available,
                 ),
             );
         }
@@ -1335,6 +1389,9 @@ if (!class_exists('UCG_Admin')) {
             if ($scenario === 'seo_tags') {
                 return __('SEO-плагин', 'unicontent-ai-generator');
             }
+            if ($scenario === 'comments' || $scenario === 'woo_reviews') {
+                return __('Режим публикации', 'unicontent-ai-generator');
+            }
             return __('Целевое поле', 'unicontent-ai-generator');
         }
 
@@ -1343,7 +1400,7 @@ if (!class_exists('UCG_Admin')) {
             $post_type = sanitize_key((string) $post_type);
 
             if ($scenario === 'seo_tags') {
-                $seo_profiles = class_exists('UCG_Tokens') ? UCG_Tokens::get_seo_profile_options(true) : array();
+                $seo_profiles = class_exists('UCG_Tokens') ? UCG_Tokens::get_seo_profile_options(true, true) : array();
                 $fields = array();
                 foreach ($seo_profiles as $profile) {
                     if (!is_array($profile) || empty($profile['value'])) {
@@ -1354,9 +1411,14 @@ if (!class_exists('UCG_Admin')) {
                         continue;
                     }
                     $profile_label = isset($profile['label']) ? (string) $profile['label'] : $profile_value;
+                    $profile_available = !array_key_exists('is_available', $profile) ? true : !empty($profile['is_available']);
+                    if (!$profile_available && $profile_value !== 'auto') {
+                        $profile_label .= ' (' . __('не активен', 'unicontent-ai-generator') . ')';
+                    }
                     $fields[] = array(
                         'value' => 'seo:' . $profile_value,
                         'label' => $profile_label,
+                        'disabled' => !$profile_available,
                     );
                 }
 
@@ -1372,23 +1434,72 @@ if (!class_exists('UCG_Admin')) {
                 );
             }
 
+            if ($scenario === 'comments') {
+                if (!post_type_supports($post_type, 'comments')) {
+                    return array(
+                        array(
+                            'value' => 'comment:publish',
+                            'label' => __('Комментарии не поддерживаются для этого типа записей.', 'unicontent-ai-generator'),
+                            'disabled' => true,
+                        ),
+                    );
+                }
+
+                return array(
+                    array(
+                        'value' => 'comment:publish',
+                        'label' => __('WordPress комментарий (1 на запись)', 'unicontent-ai-generator'),
+                    ),
+                );
+            }
+
+            if ($scenario === 'woo_reviews') {
+                if ($post_type !== 'product') {
+                    return array(
+                        array(
+                            'value' => 'woo_review:publish',
+                            'label' => __('Для отзывов выберите тип записей: Товар (product).', 'unicontent-ai-generator'),
+                            'disabled' => true,
+                        ),
+                    );
+                }
+
+                return array(
+                    array(
+                        'value' => 'woo_review:publish',
+                        'label' => __('WooCommerce отзыв (1 на товар)', 'unicontent-ai-generator'),
+                    ),
+                );
+            }
+
             return UCG_Tokens::get_target_fields_for_post_type($post_type);
         }
 
-        protected function encode_template_payload($scenario, $body, $seo_title_prompt = '', $seo_description_prompt = '') {
+        protected function encode_template_payload($scenario, $body, $seo_title_prompt = '', $seo_description_prompt = '', $prompt_blocks = array(), $base_prompt = '') {
             $scenario = $this->normalize_generation_scenario($scenario);
             $body = (string) $body;
             $seo_title_prompt = (string) $seo_title_prompt;
             $seo_description_prompt = (string) $seo_description_prompt;
+            $base_prompt = (string) $base_prompt;
+            $normalized_blocks = $this->normalize_prompt_blocks($prompt_blocks, $scenario);
 
-            if ($scenario !== 'seo_tags') {
+            if ($scenario !== 'seo_tags' && empty($normalized_blocks) && trim($base_prompt) === '') {
                 return $body;
             }
 
             $payload = array(
-                'seo_title_prompt' => $seo_title_prompt,
-                'seo_description_prompt' => $seo_description_prompt,
+                'version' => 2,
+                'scenario' => $scenario,
+                'body' => $body,
+                'base_prompt' => $base_prompt,
+                'prompt_blocks' => $normalized_blocks,
             );
+
+            if ($scenario === 'seo_tags') {
+                $payload['seo_title_prompt'] = $seo_title_prompt;
+                $payload['seo_description_prompt'] = $seo_description_prompt;
+            }
+
             return wp_json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         }
 
@@ -1399,22 +1510,279 @@ if (!class_exists('UCG_Admin')) {
                 'body' => $raw_body,
                 'seo_title_prompt' => '',
                 'seo_description_prompt' => '',
+                'base_prompt' => '',
+                'prompt_blocks' => array(),
             );
-
-            if ($scenario !== 'seo_tags') {
-                return $result;
-            }
 
             $decoded = json_decode($raw_body, true);
             if (is_array($decoded)) {
                 $result['body'] = isset($decoded['body']) ? (string) $decoded['body'] : '';
                 $result['seo_title_prompt'] = isset($decoded['seo_title_prompt']) ? (string) $decoded['seo_title_prompt'] : '';
                 $result['seo_description_prompt'] = isset($decoded['seo_description_prompt']) ? (string) $decoded['seo_description_prompt'] : '';
-                return $result;
+                $result['base_prompt'] = isset($decoded['base_prompt']) ? (string) $decoded['base_prompt'] : '';
+                $result['prompt_blocks'] = isset($decoded['prompt_blocks']) && is_array($decoded['prompt_blocks'])
+                    ? $decoded['prompt_blocks']
+                    : array();
             }
 
-            $result['body'] = $raw_body;
+            $result['prompt_blocks'] = $this->build_editor_prompt_blocks($scenario, $result);
+            $derived = $this->derive_template_prompts_from_blocks($scenario, isset($result['base_prompt']) ? (string) $result['base_prompt'] : '', $result['prompt_blocks']);
+
+            if (trim((string) $result['body']) === '' && !empty($derived['body'])) {
+                $result['body'] = (string) $derived['body'];
+            }
+            if (trim((string) $result['seo_title_prompt']) === '' && !empty($derived['seo_title_prompt'])) {
+                $result['seo_title_prompt'] = (string) $derived['seo_title_prompt'];
+            }
+            if (trim((string) $result['seo_description_prompt']) === '' && !empty($derived['seo_description_prompt'])) {
+                $result['seo_description_prompt'] = (string) $derived['seo_description_prompt'];
+            }
+
             return $result;
+        }
+
+        protected function default_prompt_blocks_for_scenario($scenario) {
+            $scenario = $this->normalize_generation_scenario($scenario);
+            if ($scenario === 'seo_tags') {
+                return array(
+                    array(
+                        'id' => 'seo_title',
+                        'label' => __('SEO title', 'unicontent-ai-generator'),
+                        'prompt' => '',
+                    ),
+                    array(
+                        'id' => 'seo_description',
+                        'label' => __('SEO description', 'unicontent-ai-generator'),
+                        'prompt' => '',
+                    ),
+                );
+            }
+
+            return array(
+                array(
+                    'id' => 'main',
+                    'label' => __('Основной промпт', 'unicontent-ai-generator'),
+                    'prompt' => '',
+                ),
+            );
+        }
+
+        protected function build_editor_prompt_blocks($scenario, $payload) {
+            $scenario = $this->normalize_generation_scenario($scenario);
+            $payload = is_array($payload) ? $payload : array();
+            $raw_blocks = isset($payload['prompt_blocks']) && is_array($payload['prompt_blocks']) ? $payload['prompt_blocks'] : array();
+
+            $blocks = array();
+            $used = array();
+            foreach ($raw_blocks as $raw_block) {
+                if (!is_array($raw_block)) {
+                    continue;
+                }
+                $block_id = sanitize_key(isset($raw_block['id']) ? (string) $raw_block['id'] : '');
+                $block_label = sanitize_text_field(isset($raw_block['label']) ? (string) $raw_block['label'] : '');
+                $block_prompt = sanitize_textarea_field(isset($raw_block['prompt']) ? (string) $raw_block['prompt'] : '');
+
+                if ($block_id === '') {
+                    $block_id = 'block_' . (count($blocks) + 1);
+                }
+                if (isset($used[$block_id])) {
+                    $block_id = $block_id . '_' . (count($blocks) + 1);
+                }
+                $used[$block_id] = true;
+
+                if ($block_label === '') {
+                    $block_label = ucfirst(str_replace('_', ' ', $block_id));
+                }
+
+                $blocks[] = array(
+                    'id' => $block_id,
+                    'label' => $block_label,
+                    'prompt' => $block_prompt,
+                );
+            }
+
+            if (!empty($blocks)) {
+                return $blocks;
+            }
+
+            $defaults = $this->default_prompt_blocks_for_scenario($scenario);
+            if ($scenario === 'seo_tags') {
+                $title_prompt = isset($payload['seo_title_prompt']) ? (string) $payload['seo_title_prompt'] : '';
+                $description_prompt = isset($payload['seo_description_prompt']) ? (string) $payload['seo_description_prompt'] : '';
+                $fallback_body = isset($payload['body']) ? (string) $payload['body'] : '';
+                if ($title_prompt === '') {
+                    $title_prompt = $fallback_body;
+                }
+                if ($description_prompt === '') {
+                    $description_prompt = $fallback_body;
+                }
+                if (isset($defaults[0])) {
+                    $defaults[0]['prompt'] = $title_prompt;
+                }
+                if (isset($defaults[1])) {
+                    $defaults[1]['prompt'] = $description_prompt;
+                }
+            } elseif (isset($defaults[0])) {
+                $defaults[0]['prompt'] = isset($payload['body']) ? (string) $payload['body'] : '';
+            }
+
+            return $defaults;
+        }
+
+        protected function parse_prompt_blocks_from_request($request, $scenario) {
+            $scenario = $this->normalize_generation_scenario($scenario);
+            $request = is_array($request) ? $request : array();
+            $raw_keys = isset($request['prompt_blocks_key']) && is_array($request['prompt_blocks_key']) ? $request['prompt_blocks_key'] : array();
+            $raw_labels = isset($request['prompt_blocks_label']) && is_array($request['prompt_blocks_label']) ? $request['prompt_blocks_label'] : array();
+            $raw_prompts = isset($request['prompt_blocks_prompt']) && is_array($request['prompt_blocks_prompt']) ? $request['prompt_blocks_prompt'] : array();
+            $max_count = max(count($raw_keys), count($raw_labels), count($raw_prompts));
+            $blocks = array();
+
+            for ($i = 0; $i < $max_count; $i++) {
+                $blocks[] = array(
+                    'id' => isset($raw_keys[$i]) ? wp_unslash((string) $raw_keys[$i]) : '',
+                    'label' => isset($raw_labels[$i]) ? wp_unslash((string) $raw_labels[$i]) : '',
+                    'prompt' => isset($raw_prompts[$i]) ? wp_unslash((string) $raw_prompts[$i]) : '',
+                );
+            }
+
+            return $this->normalize_prompt_blocks($blocks, $scenario);
+        }
+
+        protected function normalize_prompt_blocks($raw_blocks, $scenario) {
+            $scenario = $this->normalize_generation_scenario($scenario);
+            $raw_blocks = is_array($raw_blocks) ? $raw_blocks : array();
+            $normalized = array();
+            $used_ids = array();
+            $index = 1;
+
+            foreach ($raw_blocks as $raw_block) {
+                if (!is_array($raw_block)) {
+                    continue;
+                }
+                $block_id = sanitize_key(isset($raw_block['id']) ? (string) $raw_block['id'] : '');
+                $block_label = sanitize_text_field(isset($raw_block['label']) ? (string) $raw_block['label'] : '');
+                $block_prompt = sanitize_textarea_field(isset($raw_block['prompt']) ? (string) $raw_block['prompt'] : '');
+                if (trim($block_prompt) === '') {
+                    continue;
+                }
+
+                if ($block_id === '') {
+                    $block_id = 'block_' . $index;
+                }
+                $base_block_id = $block_id;
+                $suffix = 2;
+                while (isset($used_ids[$block_id])) {
+                    $block_id = $base_block_id . '_' . $suffix;
+                    $suffix++;
+                }
+                $used_ids[$block_id] = true;
+
+                if ($block_label === '') {
+                    $block_label = ucfirst(str_replace('_', ' ', $block_id));
+                }
+
+                $normalized[] = array(
+                    'id' => $block_id,
+                    'label' => $block_label,
+                    'prompt' => $block_prompt,
+                );
+                $index++;
+            }
+
+            return $normalized;
+        }
+
+        protected function derive_template_prompts_from_blocks($scenario, $base_prompt, $prompt_blocks) {
+            $scenario = $this->normalize_generation_scenario($scenario);
+            $base_prompt = sanitize_textarea_field((string) $base_prompt);
+            $normalized_blocks = $this->normalize_prompt_blocks($prompt_blocks, $scenario);
+
+            $first_prompt = '';
+            if (!empty($normalized_blocks[0]['prompt'])) {
+                $first_prompt = (string) $normalized_blocks[0]['prompt'];
+            }
+
+            $body = $this->compose_prompt_with_base($base_prompt, $first_prompt);
+            if ($body === '' && $base_prompt !== '') {
+                $body = $base_prompt;
+            }
+
+            $seo_title_prompt = '';
+            $seo_description_prompt = '';
+            if ($scenario === 'seo_tags') {
+                $seo_title_raw = $this->find_prompt_block_prompt_by_ids($normalized_blocks, array('seo_title', 'title', 'meta_title'));
+                $seo_description_raw = $this->find_prompt_block_prompt_by_ids($normalized_blocks, array('seo_description', 'description', 'meta_description', 'desc'));
+
+                if ($seo_title_raw === '' && $first_prompt !== '') {
+                    $seo_title_raw = $first_prompt;
+                }
+                if ($seo_description_raw === '') {
+                    if (isset($normalized_blocks[1]['prompt']) && trim((string) $normalized_blocks[1]['prompt']) !== '') {
+                        $seo_description_raw = (string) $normalized_blocks[1]['prompt'];
+                    } elseif ($first_prompt !== '') {
+                        $seo_description_raw = $first_prompt;
+                    }
+                }
+
+                $seo_title_prompt = $this->compose_prompt_with_base($base_prompt, $seo_title_raw);
+                $seo_description_prompt = $this->compose_prompt_with_base($base_prompt, $seo_description_raw);
+                if ($body === '' && $seo_title_prompt !== '') {
+                    $body = $seo_title_prompt;
+                }
+            }
+
+            return array(
+                'body' => $body,
+                'seo_title_prompt' => $seo_title_prompt,
+                'seo_description_prompt' => $seo_description_prompt,
+                'prompt_blocks' => $normalized_blocks,
+                'base_prompt' => $base_prompt,
+            );
+        }
+
+        protected function compose_prompt_with_base($base_prompt, $prompt) {
+            $base_prompt = trim((string) $base_prompt);
+            $prompt = trim((string) $prompt);
+            if ($base_prompt !== '' && $prompt !== '') {
+                return $base_prompt . "\n\n" . $prompt;
+            }
+            if ($base_prompt !== '') {
+                return $base_prompt;
+            }
+            return $prompt;
+        }
+
+        protected function find_prompt_block_prompt_by_ids($prompt_blocks, $preferred_ids) {
+            $prompt_blocks = is_array($prompt_blocks) ? $prompt_blocks : array();
+            $preferred_ids = is_array($preferred_ids) ? $preferred_ids : array();
+            if (empty($prompt_blocks) || empty($preferred_ids)) {
+                return '';
+            }
+
+            $preferred_map = array();
+            foreach ($preferred_ids as $id) {
+                $key = sanitize_key((string) $id);
+                if ($key !== '') {
+                    $preferred_map[$key] = true;
+                }
+            }
+
+            foreach ($prompt_blocks as $block) {
+                if (!is_array($block) || empty($block['id'])) {
+                    continue;
+                }
+                $block_id = sanitize_key((string) $block['id']);
+                if (!isset($preferred_map[$block_id])) {
+                    continue;
+                }
+                $block_prompt = isset($block['prompt']) ? trim((string) $block['prompt']) : '';
+                if ($block_prompt !== '') {
+                    return $block_prompt;
+                }
+            }
+
+            return '';
         }
 
         protected function get_filter_fields_for_post_type($post_type) {
@@ -2083,6 +2451,7 @@ if (!class_exists('UCG_Admin')) {
             $map = array(
                 'field_update' => __('1 поле', 'unicontent-ai-generator'),
                 'seo_tags' => __('1 SEO-пакет', 'unicontent-ai-generator'),
+                'comments' => __('1 комментарий', 'unicontent-ai-generator'),
                 'woo_reviews' => __('1 отзыв', 'unicontent-ai-generator'),
             );
 

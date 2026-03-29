@@ -44,6 +44,10 @@ if (!class_exists('UCG_Tokens')) {
             return (string) $post_types[0]['value'];
         }
 
+        public static function has_woocommerce_support() {
+            return class_exists('WooCommerce') && post_type_exists('product');
+        }
+
         public static function get_target_fields_for_post_type($post_type) {
             $post_type = sanitize_key((string) $post_type);
             if ($post_type === '' || !post_type_exists($post_type)) {
@@ -223,7 +227,180 @@ if (!class_exists('UCG_Tokens')) {
                 return self::write_seo_package($post_id, $profile, $text);
             }
 
+            if (strpos($target_field, 'comment:') === 0) {
+                return self::write_generated_comment($post_id, $text);
+            }
+
+            if (strpos($target_field, 'woo_review:') === 0) {
+                return self::write_generated_woo_review($post_id, $text);
+            }
+
             return new WP_Error('ucg_target_not_supported', __('Тип целевого поля не поддерживается.', 'unicontent-ai-generator'));
+        }
+
+        protected static function write_generated_comment($post_id, $text) {
+            if (!post_type_supports(get_post_type($post_id), 'comments')) {
+                return new WP_Error('ucg_comments_not_supported', __('Этот тип записи не поддерживает комментарии.', 'unicontent-ai-generator'));
+            }
+            $payload = self::parse_generated_comment_payload($text, false);
+            return self::insert_generated_comment($post_id, $payload, 'comment');
+        }
+
+        protected static function write_generated_woo_review($post_id, $text) {
+            if (!self::has_woocommerce_support()) {
+                return new WP_Error('ucg_woo_missing', __('WooCommerce не активен.', 'unicontent-ai-generator'));
+            }
+
+            if (get_post_type($post_id) !== 'product') {
+                return new WP_Error('ucg_woo_not_product', __('Отзывы WooCommerce можно создавать только для товаров.', 'unicontent-ai-generator'));
+            }
+
+            $payload = self::parse_generated_comment_payload($text, true);
+            return self::insert_generated_comment($post_id, $payload, 'review');
+        }
+
+        protected static function parse_generated_comment_payload($text, $is_review = false) {
+            $text = trim((string) $text);
+            $is_review = !empty($is_review);
+
+            $payload = array(
+                'author_name' => '',
+                'author_email' => '',
+                'content' => '',
+                'rating' => 0,
+            );
+
+            $json_payload = self::extract_json_payload($text);
+            if (!empty($json_payload)) {
+                $author_keys = array('author_name', 'author', 'name');
+                $email_keys = array('author_email', 'email');
+                $content_keys = array('content', 'text', 'comment', 'review');
+                $rating_keys = array('rating', 'stars', 'score');
+
+                foreach ($author_keys as $key) {
+                    if (!empty($json_payload[$key])) {
+                        $payload['author_name'] = self::value_to_string($json_payload[$key]);
+                        break;
+                    }
+                }
+                foreach ($email_keys as $key) {
+                    if (!empty($json_payload[$key])) {
+                        $payload['author_email'] = self::value_to_string($json_payload[$key]);
+                        break;
+                    }
+                }
+                foreach ($content_keys as $key) {
+                    if (!empty($json_payload[$key])) {
+                        $payload['content'] = self::value_to_string($json_payload[$key]);
+                        break;
+                    }
+                }
+                foreach ($rating_keys as $key) {
+                    if ($json_payload[$key] !== '' && $json_payload[$key] !== null) {
+                        $payload['rating'] = (int) $json_payload[$key];
+                        break;
+                    }
+                }
+            }
+
+            if ($payload['content'] === '' && $text !== '') {
+                $lines = preg_split('/\r\n|\r|\n/', $text);
+                if (is_array($lines)) {
+                    foreach ($lines as $line) {
+                        $line = trim((string) $line);
+                        if ($line === '') {
+                            continue;
+                        }
+                        if ($payload['author_name'] === '' && preg_match('/^(author|name|имя)\s*[:\-]\s*(.+)$/iu', $line, $match)) {
+                            $payload['author_name'] = isset($match[2]) ? (string) $match[2] : '';
+                            continue;
+                        }
+                        if ($payload['content'] === '' && preg_match('/^(comment|review|text|комментарий|отзыв)\s*[:\-]\s*(.+)$/iu', $line, $match)) {
+                            $payload['content'] = isset($match[2]) ? (string) $match[2] : '';
+                            continue;
+                        }
+                        if ($payload['rating'] <= 0 && preg_match('/^(rating|stars|оценка)\s*[:\-]\s*([0-9]+)/iu', $line, $match)) {
+                            $payload['rating'] = isset($match[2]) ? (int) $match[2] : 0;
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            if ($payload['content'] === '') {
+                $payload['content'] = $text;
+            }
+
+            $payload['author_name'] = trim(sanitize_text_field((string) $payload['author_name']));
+            $payload['author_email'] = sanitize_email((string) $payload['author_email']);
+            $payload['content'] = trim((string) wp_kses_post((string) $payload['content']));
+            $payload['rating'] = self::normalize_rating_value($payload['rating'], $is_review);
+
+            if ($payload['author_name'] === '') {
+                $payload['author_name'] = $is_review
+                    ? __('Покупатель', 'unicontent-ai-generator')
+                    : __('Посетитель', 'unicontent-ai-generator');
+            }
+
+            return $payload;
+        }
+
+        protected static function normalize_rating_value($rating, $is_review) {
+            $rating = (int) $rating;
+            if (!$is_review) {
+                return 0;
+            }
+            if ($rating < 1 || $rating > 5) {
+                return 5;
+            }
+            return $rating;
+        }
+
+        protected static function insert_generated_comment($post_id, $payload, $comment_type = 'comment') {
+            $post_id = (int) $post_id;
+            $comment_type = sanitize_key((string) $comment_type);
+            $payload = is_array($payload) ? $payload : array();
+
+            $content = isset($payload['content']) ? trim((string) $payload['content']) : '';
+            if ($post_id <= 0 || $content === '') {
+                return new WP_Error('ucg_comment_empty', __('Пустой текст комментария.', 'unicontent-ai-generator'));
+            }
+
+            $author_name = isset($payload['author_name']) ? trim((string) $payload['author_name']) : '';
+            if ($author_name === '') {
+                $author_name = __('Пользователь', 'unicontent-ai-generator');
+            }
+            $author_email = isset($payload['author_email']) ? sanitize_email((string) $payload['author_email']) : '';
+            if ($author_email === '') {
+                $author_email = 'noreply+' . $post_id . '+' . wp_generate_password(6, false, false) . '@example.local';
+            }
+
+            $comment_id = wp_insert_comment(
+                array(
+                    'comment_post_ID' => $post_id,
+                    'comment_author' => $author_name,
+                    'comment_author_email' => $author_email,
+                    'comment_content' => $content,
+                    'comment_type' => $comment_type === 'review' ? 'review' : '',
+                    'comment_approved' => 1,
+                    'comment_author_url' => '',
+                    'user_id' => 0,
+                )
+            );
+
+            if (!$comment_id) {
+                return new WP_Error('ucg_comment_insert_failed', __('Не удалось создать комментарий.', 'unicontent-ai-generator'));
+            }
+
+            if ($comment_type === 'review') {
+                $rating = isset($payload['rating']) ? (int) $payload['rating'] : 5;
+                if ($rating < 1 || $rating > 5) {
+                    $rating = 5;
+                }
+                update_comment_meta($comment_id, 'rating', $rating);
+            }
+
+            return true;
         }
 
         protected static function get_known_seo_target_fields() {
@@ -254,35 +431,44 @@ if (!class_exists('UCG_Tokens')) {
             return $fields;
         }
 
-        public static function get_seo_profile_options($include_auto = true) {
+        public static function get_seo_profile_options($include_auto = true, $include_unavailable = false) {
             $include_auto = !empty($include_auto);
+            $include_unavailable = !empty($include_unavailable);
             $options = array();
+            $yoast_available = defined('WPSEO_VERSION') || class_exists('WPSEO_Meta');
+            $rank_math_available = defined('RANK_MATH_VERSION') || class_exists('RankMath');
+            $aioseo_available = defined('AIOSEO_VERSION') || class_exists('AIOSEO\\Plugin\\Common\\Main\\Main') || class_exists('AIOSEO\\Plugin\\Common\\Main');
+            $has_active = $yoast_available || $rank_math_available || $aioseo_available;
 
             if ($include_auto) {
                 $options[] = array(
                     'value' => 'auto',
                     'label' => __('Авто (активный SEO плагин)', 'unicontent-ai-generator'),
+                    'is_available' => $has_active,
                 );
             }
 
-            if (defined('WPSEO_VERSION') || class_exists('WPSEO_Meta')) {
+            if ($include_unavailable || $yoast_available) {
                 $options[] = array(
                     'value' => 'yoast',
                     'label' => 'Yoast SEO',
+                    'is_available' => $yoast_available,
                 );
             }
 
-            if (defined('RANK_MATH_VERSION') || class_exists('RankMath')) {
+            if ($include_unavailable || $rank_math_available) {
                 $options[] = array(
                     'value' => 'rank_math',
                     'label' => 'Rank Math',
+                    'is_available' => $rank_math_available,
                 );
             }
 
-            if (defined('AIOSEO_VERSION') || class_exists('AIOSEO\\Plugin\\Common\\Main\\Main') || class_exists('AIOSEO\\Plugin\\Common\\Main')) {
+            if ($include_unavailable || $aioseo_available) {
                 $options[] = array(
                     'value' => 'aioseo',
                     'label' => 'All in One SEO',
+                    'is_available' => $aioseo_available,
                 );
             }
 
@@ -290,7 +476,7 @@ if (!class_exists('UCG_Tokens')) {
         }
 
         public static function has_supported_seo_plugin() {
-            $options = self::get_seo_profile_options(false);
+            $options = self::get_seo_profile_options(false, false);
             return !empty($options);
         }
 
@@ -323,7 +509,7 @@ if (!class_exists('UCG_Tokens')) {
                 return '';
             }
 
-            foreach (self::get_seo_profile_options(false) as $item) {
+            foreach (self::get_seo_profile_options(false, false) as $item) {
                 if (!is_array($item) || empty($item['value'])) {
                     continue;
                 }
@@ -565,6 +751,47 @@ if (!class_exists('UCG_Tokens')) {
                     $parts[] = __('Description:', 'unicontent-ai-generator') . ' ' . $description;
                 }
                 return implode(' ', $parts);
+            }
+
+            if (strpos($target_field, 'comment:') === 0) {
+                $comment = get_comments(
+                    array(
+                        'post_id' => $post_id,
+                        'status' => 'approve',
+                        'type' => 'comment',
+                        'number' => 1,
+                        'orderby' => 'comment_ID',
+                        'order' => 'DESC',
+                    )
+                );
+                if (!is_array($comment) || empty($comment[0]) || !($comment[0] instanceof WP_Comment)) {
+                    return '';
+                }
+                $latest = $comment[0];
+                return trim((string) $latest->comment_content);
+            }
+
+            if (strpos($target_field, 'woo_review:') === 0) {
+                $review = get_comments(
+                    array(
+                        'post_id' => $post_id,
+                        'status' => 'approve',
+                        'type' => 'review',
+                        'number' => 1,
+                        'orderby' => 'comment_ID',
+                        'order' => 'DESC',
+                    )
+                );
+                if (!is_array($review) || empty($review[0]) || !($review[0] instanceof WP_Comment)) {
+                    return '';
+                }
+                $latest = $review[0];
+                $rating = (int) get_comment_meta((int) $latest->comment_ID, 'rating', true);
+                $result = trim((string) $latest->comment_content);
+                if ($rating > 0) {
+                    $result = '[' . __('Оценка', 'unicontent-ai-generator') . ': ' . $rating . '/5] ' . $result;
+                }
+                return $result;
             }
 
             return '';

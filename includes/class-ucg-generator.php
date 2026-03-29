@@ -380,6 +380,7 @@ if (!class_exists('UCG_Generator')) {
                 );
                 return new WP_Error('ucg_prompt_empty', __('Промпт пустой.', 'unicontent-ai-generator'));
             }
+            $prompt = $this->build_prompt_for_comment_and_review_scenarios($prompt, $scenario);
 
             $response = $api_client->generate_text($prompt, $system_prompt, $max_tokens, $length_option_id, $vary_length, $model);
             if (is_wp_error($response)) {
@@ -448,6 +449,23 @@ if (!class_exists('UCG_Generator')) {
             UCG_DB::update_run_item($item_id, $update_data);
 
             return true;
+        }
+
+        protected function build_prompt_for_comment_and_review_scenarios($prompt, $scenario) {
+            $prompt = (string) $prompt;
+            $scenario = sanitize_key((string) $scenario);
+
+            if ($scenario === 'comments') {
+                $instruction = __('Верни только JSON без markdown: {"author_name":"...","content":"..."}.', 'unicontent-ai-generator');
+                return $prompt . "\n\n" . $instruction;
+            }
+
+            if ($scenario === 'woo_reviews') {
+                $instruction = __('Верни только JSON без markdown: {"author_name":"...","content":"...","rating":5}. rating от 1 до 5.', 'unicontent-ai-generator');
+                return $prompt . "\n\n" . $instruction;
+            }
+
+            return $prompt;
         }
 
         protected function build_prompt_for_single_seo_field($prompt, $field) {

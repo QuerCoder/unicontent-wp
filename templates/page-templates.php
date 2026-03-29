@@ -5,7 +5,7 @@
     <div class="ucg-page-head">
         <div class="ucg-page-head__meta">
             <h1>Шаблоны промптов</h1>
-            <p class="ucg-muted">Собирайте промпт из токенов: название, контент, метаполя, ACF и WooCommerce.</p>
+            <p class="ucg-muted">Гибкий редактор: базовая инструкция + любое количество блоков промпта для разных сценариев.</p>
         </div>
         <div class="ucg-page-head__actions">
             <a class="button button-small ucg-btn--secondary" href="<?php echo esc_url(admin_url('admin.php?page=ucg-ready-templates&post_type=' . $selected_post_type)); ?>">
@@ -40,9 +40,88 @@
                 </label>
 
                 <label class="ucg-field">
-                    <span>Текст шаблона</span>
-                    <textarea name="body" id="ucg-template-body" rows="12" required><?php echo esc_textarea($editing_template ? (string) $editing_template['body'] : ''); ?></textarea>
+                    <span>Сценарий</span>
+                    <select name="scenario" id="ucg-template-scenario" class="ucg-enhanced-select" data-search-enabled="false" data-placeholder="Выберите сценарий">
+                        <?php
+                        $template_scenario_options_safe = isset($template_scenario_options) && is_array($template_scenario_options)
+                            ? $template_scenario_options
+                            : array();
+                        $editing_template_scenario_safe = isset($editing_template_scenario) ? (string) $editing_template_scenario : 'field_update';
+                        foreach ($template_scenario_options_safe as $scenario_item) :
+                            $scenario_value = isset($scenario_item['value']) ? sanitize_key((string) $scenario_item['value']) : '';
+                            if ($scenario_value === '') {
+                                continue;
+                            }
+                            $scenario_label = isset($scenario_item['label']) ? (string) $scenario_item['label'] : $scenario_value;
+                            $scenario_available = !array_key_exists('is_available', $scenario_item) || !empty($scenario_item['is_available']);
+                            $scenario_selected = $editing_template_scenario_safe === $scenario_value;
+                            ?>
+                            <option
+                                value="<?php echo esc_attr($scenario_value); ?>"
+                                <?php selected($scenario_selected); ?>
+                                <?php disabled(!$scenario_available && !$scenario_selected); ?>
+                            >
+                                <?php
+                                $label_text = $scenario_label;
+                                if (!$scenario_available && !$scenario_selected) {
+                                    $label_text .= ' (недоступно)';
+                                }
+                                echo esc_html($label_text);
+                                ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
                 </label>
+
+                <label class="ucg-field">
+                    <span>Базовый промпт (опционально)</span>
+                    <textarea name="base_prompt" id="ucg-template-body" rows="5"><?php echo esc_textarea(isset($editing_base_prompt) ? (string) $editing_base_prompt : ''); ?></textarea>
+                    <p class="ucg-muted ucg-field-hint">Добавляется перед каждым блоком. Удобно для общих требований стиля, языка и ограничений.</p>
+                </label>
+
+                <div class="ucg-field">
+                    <div class="ucg-template-blocks-head">
+                        <span>Блоки промптов</span>
+                        <button type="button" class="button button-small" id="ucg-add-prompt-block">+ Добавить блок</button>
+                    </div>
+                    <div id="ucg-template-block-rows" class="ucg-template-block-rows">
+                        <?php
+                        $template_blocks_safe = isset($editing_prompt_blocks) && is_array($editing_prompt_blocks) ? $editing_prompt_blocks : array();
+                        if (empty($template_blocks_safe)) {
+                            $template_blocks_safe[] = array(
+                                'id' => 'main',
+                                'label' => 'Основной промпт',
+                                'prompt' => '',
+                            );
+                        }
+                        foreach ($template_blocks_safe as $index => $template_block) :
+                            $block_key = isset($template_block['id']) ? (string) $template_block['id'] : ('block_' . ((int) $index + 1));
+                            $block_label = isset($template_block['label']) ? (string) $template_block['label'] : '';
+                            $block_prompt = isset($template_block['prompt']) ? (string) $template_block['prompt'] : '';
+                            ?>
+                            <div class="ucg-template-block-row" data-index="<?php echo (int) $index; ?>">
+                                <div class="ucg-grid-2">
+                                    <label class="ucg-field">
+                                        <span>Ключ блока</span>
+                                        <input type="text" name="prompt_blocks_key[]" value="<?php echo esc_attr($block_key); ?>" placeholder="main / seo_title / excerpt">
+                                    </label>
+                                    <label class="ucg-field">
+                                        <span>Название блока</span>
+                                        <input type="text" name="prompt_blocks_label[]" value="<?php echo esc_attr($block_label); ?>" placeholder="Например: SEO title">
+                                    </label>
+                                </div>
+                                <label class="ucg-field">
+                                    <span>Промпт блока</span>
+                                    <textarea name="prompt_blocks_prompt[]" class="ucg-template-block-input" rows="6" placeholder="Текст промпта для этого блока"><?php echo esc_textarea($block_prompt); ?></textarea>
+                                </label>
+                                <div class="ucg-template-block-actions">
+                                    <button type="button" class="button button-small ucg-remove-prompt-block">Удалить блок</button>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                    <p class="ucg-muted ucg-field-hint">Для сценария “Поля” обычно достаточно 1 блока. Для SEO — минимум 2 блока (title/description).</p>
+                </div>
 
                 <label class="ucg-checkbox">
                     <input type="checkbox" name="is_default" value="1" <?php checked($editing_template && !empty($editing_template['is_default'])); ?>>
@@ -82,6 +161,7 @@
                     <tr>
                         <th>ID</th>
                         <th>Название</th>
+                        <th>Сценарий</th>
                         <th>Post type</th>
                         <th>По умолчанию</th>
                         <th style="width: 220px;">Действия</th>
@@ -92,6 +172,7 @@
                         <tr>
                             <td>#<?php echo (int) $template['id']; ?></td>
                             <td><?php echo esc_html((string) $template['name']); ?></td>
+                            <td><code><?php echo esc_html(isset($template['scenario']) ? (string) $template['scenario'] : 'field_update'); ?></code></td>
                             <td><code><?php echo esc_html((string) $template['post_type']); ?></code></td>
                             <td><?php echo !empty($template['is_default']) ? '<span class="ucg-chip ucg-chip--ok">Да</span>' : '—'; ?></td>
                             <td class="ucg-inline-actions">

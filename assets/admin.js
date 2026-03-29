@@ -490,8 +490,11 @@ jQuery(function ($) {
 
     function initTemplatesPage() {
         const $templatePostType = $('#ucg-template-post-type');
+        const $templateScenario = $('#ucg-template-scenario');
         const $tokensContainer = $('#ucg-template-tokens');
         const $templateBody = $('#ucg-template-body');
+        const $templateBlockRows = $('#ucg-template-block-rows');
+        const $addPromptBlock = $('#ucg-add-prompt-block');
         const $templateName = $('input[name="name"]');
         const $readyTypeFilter = $('#ucg-ready-type-filter');
         const $readyCards = $('.ucg-ready-card');
@@ -507,9 +510,112 @@ jQuery(function ($) {
             types: Array.isArray(promptLibraryData.types) ? promptLibraryData.types : [],
             prompts: Array.isArray(promptLibraryData.prompts) ? promptLibraryData.prompts : []
         };
+        let $activeTemplateInput = $templateBody;
 
-        if (!$tokensContainer.length && !$templateBody.length && !$readyTypeFilter.length && !$readyCards.length) {
+        if (
+            !$tokensContainer.length &&
+            !$templateBody.length &&
+            !$templateBlockRows.length &&
+            !$readyTypeFilter.length &&
+            !$readyCards.length
+        ) {
             return;
+        }
+
+        function activeTemplateEditorInput() {
+            if ($activeTemplateInput && $activeTemplateInput.length && $activeTemplateInput.is(':visible')) {
+                return $activeTemplateInput;
+            }
+            const $firstBlockInput = $templateBlockRows.find('.ucg-template-block-input').first();
+            if ($firstBlockInput.length) {
+                return $firstBlockInput;
+            }
+            return $templateBody;
+        }
+
+        function buildBlockRow(index, key, label, prompt) {
+            const safeIndex = Number(index || 0);
+            const safeKey = String(key || '');
+            const safeLabel = String(label || '');
+            const safePrompt = String(prompt || '');
+            return '' +
+                '<div class="ucg-template-block-row" data-index="' + safeIndex + '">' +
+                '  <div class="ucg-grid-2">' +
+                '    <label class="ucg-field">' +
+                '      <span>' + escapeHtml(jsT('Ключ блока')) + '</span>' +
+                '      <input type="text" name="prompt_blocks_key[]" value="' + escapeHtml(safeKey) + '" placeholder="' + escapeHtml(jsT('main / seo_title / excerpt')) + '">' +
+                '    </label>' +
+                '    <label class="ucg-field">' +
+                '      <span>' + escapeHtml(jsT('Название блока')) + '</span>' +
+                '      <input type="text" name="prompt_blocks_label[]" value="' + escapeHtml(safeLabel) + '" placeholder="' + escapeHtml(jsT('Например: SEO title')) + '">' +
+                '    </label>' +
+                '  </div>' +
+                '  <label class="ucg-field">' +
+                '    <span>' + escapeHtml(jsT('Промпт блока')) + '</span>' +
+                '    <textarea name="prompt_blocks_prompt[]" class="ucg-template-block-input" rows="6" placeholder="' + escapeHtml(jsT('Текст промпта для этого блока')) + '">' + escapeHtml(safePrompt) + '</textarea>' +
+                '  </label>' +
+                '  <div class="ucg-template-block-actions">' +
+                '    <button type="button" class="button button-small ucg-remove-prompt-block">' + escapeHtml(jsT('Удалить блок')) + '</button>' +
+                '  </div>' +
+                '</div>';
+        }
+
+        function nextBlockIndex() {
+            const rowsCount = $templateBlockRows.find('.ucg-template-block-row').length;
+            return rowsCount + 1;
+        }
+
+        function addPromptBlockRow(data) {
+            if (!$templateBlockRows.length) {
+                return;
+            }
+            const payload = data && typeof data === 'object' ? data : {};
+            const index = nextBlockIndex();
+            const key = payload.key ? String(payload.key) : ('block_' + index);
+            const label = payload.label ? String(payload.label) : '';
+            const prompt = payload.prompt ? String(payload.prompt) : '';
+            $templateBlockRows.append(buildBlockRow(index, key, label, prompt));
+        }
+
+        function applyScenarioPresetIfNeeded() {
+            if (!$templateBlockRows.length) {
+                return;
+            }
+
+            const scenario = String($templateScenario.val() || 'field_update');
+            const $rows = $templateBlockRows.find('.ucg-template-block-row');
+            if (!$rows.length) {
+                if (scenario === 'seo_tags') {
+                    addPromptBlockRow({ key: 'seo_title', label: jsT('SEO title') });
+                    addPromptBlockRow({ key: 'seo_description', label: jsT('SEO description') });
+                } else {
+                    addPromptBlockRow({ key: 'main', label: jsT('Основной промпт') });
+                }
+                return;
+            }
+
+            if ($rows.length !== 1) {
+                return;
+            }
+
+            const $singleRow = $rows.first();
+            const currentKey = String($singleRow.find('input[name="prompt_blocks_key[]"]').val() || '').trim();
+            const currentPrompt = String($singleRow.find('textarea[name="prompt_blocks_prompt[]"]').val() || '').trim();
+            if (currentPrompt !== '') {
+                return;
+            }
+
+            if (scenario === 'seo_tags' && (currentKey === '' || currentKey === 'main' || currentKey === 'block_1')) {
+                $templateBlockRows.empty();
+                addPromptBlockRow({ key: 'seo_title', label: jsT('SEO title') });
+                addPromptBlockRow({ key: 'seo_description', label: jsT('SEO description') });
+                return;
+            }
+
+            if (scenario !== 'seo_tags' && (currentKey === '' || currentKey === 'seo_title')) {
+                $templateBlockRows.empty();
+                addPromptBlockRow({ key: 'main', label: jsT('Основной промпт') });
+            }
         }
 
         function applyReadyTypeFilter() {
@@ -656,7 +762,14 @@ jQuery(function ($) {
                 return;
             }
 
-            $templateBody.val(body).trigger('input');
+            const $firstBlockInput = $templateBlockRows.find('.ucg-template-block-input').first();
+            if ($firstBlockInput.length) {
+                $firstBlockInput.val(body).trigger('input');
+                $activeTemplateInput = $firstBlockInput;
+            } else if ($templateBody.length) {
+                $templateBody.val(body).trigger('input');
+                $activeTemplateInput = $templateBody;
+            }
             if ($templateName.length) {
                 const currentName = String($templateName.val() || '').trim();
                 if (!currentName) {
@@ -670,6 +783,12 @@ jQuery(function ($) {
         if ($templatePostType.length) {
             $templatePostType.on('change', function () {
                 loadTokens(String($(this).val() || ''));
+            });
+        }
+
+        if ($templateScenario.length) {
+            $templateScenario.on('change', function () {
+                applyScenarioPresetIfNeeded();
             });
         }
 
@@ -704,15 +823,33 @@ jQuery(function ($) {
             });
         }
 
-        $(document).on('click', '.ucg-token-btn', function () {
-            const token = $(this).data('token');
-            if (!$templateBody.length || !token) {
-                return;
+        if ($addPromptBlock.length) {
+            $addPromptBlock.on('click', function () {
+                addPromptBlockRow({ key: 'block_' + nextBlockIndex(), label: '' });
+            });
+        }
+
+        $(document).on('click', '.ucg-remove-prompt-block', function () {
+            const $row = $(this).closest('.ucg-template-block-row');
+            if ($row.length) {
+                $row.remove();
             }
-            insertAtCursor($templateBody, String(token));
+            applyScenarioPresetIfNeeded();
         });
 
-        $(document).on('dragstart', '.ucg-token-btn', function (event) {
+        $(document).on('focus', '#ucg-template-body, .ucg-template-block-input', function () {
+            $activeTemplateInput = $(this);
+        });
+
+        $(document).on('click', '#ucg-template-tokens .ucg-token-btn', function () {
+            const token = $(this).data('token');
+            if (!token) {
+                return;
+            }
+            insertAtCursor(activeTemplateEditorInput(), String(token));
+        });
+
+        $(document).on('dragstart', '#ucg-template-tokens .ucg-token-btn', function (event) {
             const token = String($(this).data('token') || '');
             if (!token) {
                 return;
@@ -722,11 +859,11 @@ jQuery(function ($) {
             }
         });
 
-        $templateBody.on('dragover', function (event) {
+        $(document).on('dragover', '#ucg-template-body, .ucg-template-block-input', function (event) {
             event.preventDefault();
         });
 
-        $templateBody.on('drop', function (event) {
+        $(document).on('drop', '#ucg-template-body, .ucg-template-block-input', function (event) {
             event.preventDefault();
             if (!event.originalEvent || !event.originalEvent.dataTransfer) {
                 return;
@@ -735,10 +872,15 @@ jQuery(function ($) {
             if (!token) {
                 return;
             }
-            insertAtCursor($templateBody, token);
+            const $target = $(this);
+            if ($target.length) {
+                $activeTemplateInput = $target;
+            }
+            insertAtCursor(activeTemplateEditorInput(), token);
         });
 
         initEnhancedSelects($templatePostType);
+        initEnhancedSelects($templateScenario);
         initEnhancedSelects($readyTypeFilter);
         initEnhancedSelects($libraryCategory);
         initEnhancedSelects($libraryType);
@@ -751,6 +893,11 @@ jQuery(function ($) {
 
         applyReadyTypeFilter();
         renderLibraryPromptSelect();
+        applyScenarioPresetIfNeeded();
+        const $initialBlockInput = $templateBlockRows.find('.ucg-template-block-input').first();
+        if ($initialBlockInput.length) {
+            $activeTemplateInput = $initialBlockInput;
+        }
     }
 
     function initSettingsPage() {
@@ -1215,7 +1362,8 @@ jQuery(function ($) {
                     return;
                 }
                 const label = field && field.label ? String(field.label) : value;
-                html += '<option value="' + escapeHtml(value) + '">' + escapeHtml(label) + '</option>';
+                const disabled = !!(field && field.disabled);
+                html += '<option value="' + escapeHtml(value) + '"' + (disabled ? ' disabled' : '') + '>' + escapeHtml(label) + '</option>';
             });
             destroyEnhancedSelectInstance($targetField);
             $targetField.html(html);
