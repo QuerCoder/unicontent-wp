@@ -4,7 +4,7 @@ Tags: ai, content generation, seo, woocommerce, ecommerce
 Requires at least: 5.8
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 0.2.9.1
+Stable tag: 0.2.9.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -46,6 +46,12 @@ Yes. Use generation mode with review workflow and approve/reject in bulk.
 Russian and English are supported in the admin interface.
 
 == Changelog ==
+
+= 0.2.9.2 =
+
+* Improved variables panel ergonomics in Generate wizard: grouped sections, search, compact token display, and hover hints
+* Added prominent run summary block on step 3 with records count, model, per-unit estimate, and total estimated credits
+* Improved mobile layout for new token/search and summary blocks
 
 = 0.2.9.1 =
 

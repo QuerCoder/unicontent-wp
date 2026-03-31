@@ -1061,6 +1061,7 @@ jQuery(function ($) {
         const $publishDateRangeWrap = $('#ucg-publish-date-range-wrap');
         const $publishDateFrom = $('#ucg-wizard-publish-date-from');
         const $publishDateTo = $('#ucg-wizard-publish-date-to');
+        const $wizardTokenSearch = $('#ucg-wizard-token-search');
         const $tokens = $('#ucg-wizard-tokens');
         const $filterRows = $('#ucg-filter-rows');
         const $previewBody = $('#ucg-preview-tbody');
@@ -1068,6 +1069,7 @@ jQuery(function ($) {
         const $previewPagination = $('#ucg-preview-pagination');
         const $selectedCount = $('#ucg-selected-count');
         const $runResult = $('#ucg-run-result');
+        const $runSummary = $('#ucg-run-summary');
         const $runMonitor = $('#ucg-run-monitor');
         const $runMonitorTitle = $('#ucg-run-monitor-title');
         const $runMonitorStatus = $('#ucg-run-monitor-status');
@@ -1598,6 +1600,53 @@ jQuery(function ($) {
             if ($unitHint.length) {
                 $unitHint.text(jsT('Единица расчёта: ') + unitLabel);
             }
+            renderRunSummary();
+        }
+
+        function renderRunSummary() {
+            if (!$runSummary.length) {
+                return;
+            }
+
+            const planned = getPlannedCount();
+            const lengthOptionId = Number($lengthOption.val() || 0);
+            const model = activeModelItem();
+            const creditsPerUnit = estimateCreditsByLength(model, lengthOptionId);
+            const totalCredits = planned > 0 ? (planned * creditsPerUnit) : 0;
+            const modelName = model && model.name ? String(model.name) : jsT('По умолчанию');
+            const provider = model && model.provider ? String(model.provider) : '';
+            const resolved = model && model.resolved_model ? String(model.resolved_model) : '';
+            const scope = getSelectionMode() === 'filtered' ? jsT('Все найденные') : jsT('Выбранные вручную');
+            const unitLabel = state.schema && state.schema.generation_unit_label
+                ? String(state.schema.generation_unit_label)
+                : jsT('1 единица');
+
+            let modelDetails = modelName;
+            if (provider) {
+                modelDetails += ' (' + provider + ')';
+            }
+            if (resolved) {
+                modelDetails += ' · ' + resolved;
+            }
+
+            let html = '' +
+                '<div class="ucg-run-summary__head">' +
+                '<h3 class="ucg-run-summary__title">' + escapeHtml(jsT('Сводка запуска')) + '</h3>' +
+                '<strong class="ucg-run-summary__cost">~' + escapeHtml(formatCreditsValue(totalCredits, 2)) + ' ' + escapeHtml(jsT('кр.')) + '</strong>' +
+                '</div>' +
+                '<div class="ucg-run-summary__grid">' +
+                '  <div class="ucg-run-summary__item"><span>' + escapeHtml(jsT('Записей')) + '</span><strong>' + escapeHtml(String(planned)) + '</strong></div>' +
+                '  <div class="ucg-run-summary__item"><span>' + escapeHtml(jsT('Стоимость за единицу')) + '</span><strong>~' + escapeHtml(formatCreditsValue(creditsPerUnit, 2)) + ' ' + escapeHtml(jsT('кр.')) + '</strong></div>' +
+                '  <div class="ucg-run-summary__item"><span>' + escapeHtml(jsT('Модель')) + '</span><strong>' + escapeHtml(modelDetails) + '</strong></div>' +
+                '  <div class="ucg-run-summary__item"><span>' + escapeHtml(jsT('Режим выборки')) + '</span><strong>' + escapeHtml(scope) + '</strong></div>' +
+                '</div>' +
+                '<p class="ucg-run-summary__hint">' + escapeHtml(jsT('Единица расчёта: ')) + escapeHtml(unitLabel) + '</p>';
+
+            if (planned <= 0) {
+                html += '<p class="ucg-run-summary__hint">' + escapeHtml(jsT('Выберите записи на шаге "Фильтрация".')) + '</p>';
+            }
+
+            $runSummary.html(html);
         }
 
         function renderGenerationModels() {
@@ -1645,8 +1694,106 @@ jQuery(function ($) {
             updateModelHint();
         }
 
+        function tokenGroupKeyByToken(token) {
+            const normalized = String(token || '').toLowerCase();
+            if (normalized.indexOf('{tax:') === 0) {
+                return 'taxonomy';
+            }
+            if (normalized.indexOf('{meta:') === 0 || normalized.indexOf('{acf:') === 0) {
+                return 'meta';
+            }
+            return 'main';
+        }
+
+        function tokenGroupTitle(groupKey) {
+            if (groupKey === 'taxonomy') {
+                return jsT('Таксономии');
+            }
+            if (groupKey === 'meta') {
+                return jsT('Meta-поля');
+            }
+            return jsT('Основные');
+        }
+
+        function compactTokenText(token) {
+            const raw = String(token || '');
+            if (raw.length <= 32) {
+                return raw;
+            }
+            return raw.slice(0, 14) + '…' + raw.slice(-14);
+        }
+
         function renderWizardTokens() {
-            renderTokenButtons($tokens, Array.isArray(state.schema.tokens) ? state.schema.tokens : []);
+            if (!$tokens.length) {
+                return;
+            }
+
+            const sourceTokens = Array.isArray(state.schema.tokens) ? state.schema.tokens : [];
+            const query = String($wizardTokenSearch.val() || '').trim().toLowerCase();
+            const groups = {
+                main: [],
+                taxonomy: [],
+                meta: []
+            };
+
+            sourceTokens.forEach(function (item) {
+                const token = item && item.token ? String(item.token) : '';
+                const label = item && item.label ? String(item.label) : token;
+                if (!token) {
+                    return;
+                }
+
+                if (query) {
+                    const haystack = (token + ' ' + label).toLowerCase();
+                    if (haystack.indexOf(query) === -1) {
+                        return;
+                    }
+                }
+
+                const groupKey = tokenGroupKeyByToken(token);
+                if (!Object.prototype.hasOwnProperty.call(groups, groupKey)) {
+                    groups.main.push({ token: token, label: label });
+                    return;
+                }
+                groups[groupKey].push({ token: token, label: label });
+            });
+
+            const orderedGroups = ['main', 'taxonomy', 'meta'];
+            let html = '';
+            let totalVisible = 0;
+
+            orderedGroups.forEach(function (groupKey) {
+                const items = groups[groupKey];
+                if (!Array.isArray(items) || !items.length) {
+                    return;
+                }
+                totalVisible += items.length;
+
+                let buttonsHtml = '';
+                items.forEach(function (item) {
+                    const token = item.token;
+                    const label = item.label;
+                    const displayToken = compactTokenText(token);
+                    buttonsHtml += '' +
+                        '<button type="button" class="ucg-token-btn" draggable="true" data-token="' + escapeHtml(token) + '" title="' + escapeHtml(label) + '" aria-label="' + escapeHtml(label) + '">' +
+                        '<span class="ucg-token-btn__text">' + escapeHtml(displayToken) + '</span>' +
+                        '</button>';
+                });
+
+                const openAttr = query ? ' open' : '';
+                html += '' +
+                    '<details class="ucg-token-group"' + openAttr + '>' +
+                    '  <summary>' + escapeHtml(tokenGroupTitle(groupKey)) + ' <span class="ucg-token-group__count">' + items.length + '</span></summary>' +
+                    '  <div class="ucg-token-grid">' + buttonsHtml + '</div>' +
+                    '</details>';
+            });
+
+            if (!totalVisible) {
+                $tokens.html(jsT('<p class="ucg-muted">Переменные не найдены.</p>'));
+                return;
+            }
+
+            $tokens.html(html);
         }
 
         function availableOperators() {
@@ -1844,9 +1991,10 @@ jQuery(function ($) {
             const mode = getSelectionMode();
             if (mode === 'filtered') {
                 $previewSummary.text(jsT('Будут использованы все найденные записи: ') + state.total + '.');
-                return;
+            } else {
+                $previewSummary.text(jsT('Выбрано вручную: ') + state.selectedIds.size + jsT('. Найдено по фильтру: ') + state.total + '.');
             }
-            $previewSummary.text(jsT('Выбрано вручную: ') + state.selectedIds.size + jsT('. Найдено по фильтру: ') + state.total + '.');
+            renderRunSummary();
         }
 
         function previewPosts(page, $button) {
@@ -2179,6 +2327,10 @@ jQuery(function ($) {
 
             $modelSelect.on('change', function () {
                 updateModelHint();
+            });
+
+            $wizardTokenSearch.on('input', function () {
+                renderWizardTokens();
             });
 
             $templateSelect.on('change', function () {

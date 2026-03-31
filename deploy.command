@@ -1,4 +1,5 @@
 #!/bin/zsh
+DISABLE_AUTO_UPDATE=true
 cd /Users/user/Documents/PhpStorm/unicontent/modules/wordpress
 
 # Читаем версию из плагина
@@ -32,4 +33,4 @@ gh release create "v$VERSION" \
 echo ""
 echo "✅ Плагин v$VERSION запушен и релиз создан на GitHub"
 echo "Нажмите Enter для закрытия..."
-read
+read -r -p "" _REPLY

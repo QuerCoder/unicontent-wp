@@ -307,13 +307,19 @@
 
                 <div class="ucg-token-panel">
                     <div class="ucg-token-panel__head">
-                        <h3>Переменные</h3>
-                        <span>Кликните или перетащите переменную в текст</span>
+                        <div class="ucg-token-panel__heading">
+                            <h3>Переменные</h3>
+                            <span>Кликните или перетащите переменную в текст</span>
+                        </div>
+                        <label class="ucg-token-search">
+                            <input type="search" id="ucg-wizard-token-search" placeholder="Поиск переменной">
+                        </label>
                     </div>
-                    <div class="ucg-token-grid" id="ucg-wizard-tokens"></div>
+                    <div class="ucg-token-groups" id="ucg-wizard-tokens"></div>
                 </div>
 
                 <div id="ucg-run-result" class="ucg-api-status" aria-live="polite"></div>
+                <div id="ucg-run-summary" class="ucg-run-summary" aria-live="polite"></div>
 
                 <div class="ucg-step-footer">
                     <button type="button" class="button" id="ucg-step-3-back">Назад</button>
