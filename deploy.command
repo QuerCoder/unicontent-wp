@@ -4,6 +4,18 @@ cd /Users/user/Documents/PhpStorm/unicontent/modules/wordpress
 
 # Читаем версию из плагина
 VERSION=$(grep "^\s*\*\s*Version:" unicontent-ai-generator.php | head -1 | sed 's/.*Version: *//' | tr -d '[:space:]')
+
+# Проверяем последний тег в репозитории
+LATEST_TAG=$(git fetch --tags -q 2>/dev/null; git tag --list "v*" --sort=-v:refname | head -1 | tr -d 'v')
+
+if [[ "$VERSION" == "$LATEST_TAG" ]]; then
+  # Поднимаем последнюю цифру на 1
+  NEW_VERSION=$(echo "$VERSION" | awk -F. '{$NF = $NF + 1; print}' OFS='.')
+  sed -i '' "s/ \* Version: $VERSION/ * Version: $NEW_VERSION/" unicontent-ai-generator.php
+  VERSION=$NEW_VERSION
+  echo "⬆️  Версия совпадала с тегом — поднята до: $VERSION"
+fi
+
 echo "📦 Версия: $VERSION"
 
 # Коммитим и пушим
