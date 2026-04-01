@@ -1048,6 +1048,8 @@ jQuery(function ($) {
         const $templateNameWrap = $('#ucg-template-name-wrap');
         const $saveTemplateLabel = $('#ucg-save-template-label');
         const $lengthOption = $('#ucg-wizard-length-option');
+        const $lengthControlsWrap = $('#ucg-length-controls-wrap');
+        const $seoGuidelines = $('#ucg-seo-guidelines');
         const $modelSelect = $('#ucg-wizard-model');
         const $modelHint = $('#ucg-wizard-model-hint');
         const $unitHint = $('#ucg-wizard-unit-hint');
@@ -1183,6 +1185,12 @@ jQuery(function ($) {
                 $activeTemplateTextarea = $templateBodySeoTitle;
             } else {
                 $activeTemplateTextarea = $templateBody;
+            }
+            if ($lengthControlsWrap.length) {
+                $lengthControlsWrap.toggle(!isSeo);
+            }
+            if ($seoGuidelines.length) {
+                $seoGuidelines.prop('hidden', !isSeo).toggle(isSeo);
             }
             togglePublishDateRangeControls(scenario);
         }
@@ -1608,6 +1616,7 @@ jQuery(function ($) {
                 return;
             }
 
+            const scenario = getScenario();
             const planned = getPlannedCount();
             const lengthOptionId = Number($lengthOption.val() || 0);
             const model = activeModelItem();
@@ -1620,6 +1629,9 @@ jQuery(function ($) {
             const unitLabel = state.schema && state.schema.generation_unit_label
                 ? String(state.schema.generation_unit_label)
                 : jsT('1 единица');
+            const perUnitLabel = scenario === 'seo_tags'
+                ? jsT('Стоимость за SEO-пакет')
+                : jsT('Стоимость за единицу');
 
             let modelDetails = modelName;
             if (provider) {
@@ -1636,7 +1648,7 @@ jQuery(function ($) {
                 '</div>' +
                 '<div class="ucg-run-summary__grid">' +
                 '  <div class="ucg-run-summary__item"><span>' + escapeHtml(jsT('Записей')) + '</span><strong>' + escapeHtml(String(planned)) + '</strong></div>' +
-                '  <div class="ucg-run-summary__item"><span>' + escapeHtml(jsT('Стоимость за единицу')) + '</span><strong>~' + escapeHtml(formatCreditsValue(creditsPerUnit, 2)) + ' ' + escapeHtml(jsT('кр.')) + '</strong></div>' +
+                '  <div class="ucg-run-summary__item"><span>' + escapeHtml(perUnitLabel) + '</span><strong>~' + escapeHtml(formatCreditsValue(creditsPerUnit, 2)) + ' ' + escapeHtml(jsT('кр.')) + '</strong></div>' +
                 '  <div class="ucg-run-summary__item"><span>' + escapeHtml(jsT('Модель')) + '</span><strong>' + escapeHtml(modelDetails) + '</strong></div>' +
                 '  <div class="ucg-run-summary__item"><span>' + escapeHtml(jsT('Режим выборки')) + '</span><strong>' + escapeHtml(scope) + '</strong></div>' +
                 '</div>' +
@@ -1780,7 +1792,7 @@ jQuery(function ($) {
                         '</button>';
                 });
 
-                const openAttr = query ? ' open' : '';
+                const openAttr = ' open';
                 html += '' +
                     '<details class="ucg-token-group"' + openAttr + '>' +
                     '  <summary>' + escapeHtml(tokenGroupTitle(groupKey)) + ' <span class="ucg-token-group__count">' + items.length + '</span></summary>' +

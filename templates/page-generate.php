@@ -223,7 +223,7 @@
                     </label>
                 </div>
 
-                <div class="ucg-grid-2 ucg-length-controls">
+                <div class="ucg-grid-2 ucg-length-controls" id="ucg-length-controls-wrap">
                     <label class="ucg-field">
                         <span>Длина текста</span>
                         <select id="ucg-wizard-length-option" class="ucg-enhanced-select" data-search-enabled="false">
@@ -256,6 +256,11 @@
                         </label>
                         <p class="ucg-muted ucg-field-hint" id="ucg-wizard-vary-length-hint"></p>
                     </div>
+                </div>
+
+                <div class="ucg-seo-guidelines" id="ucg-seo-guidelines" hidden>
+                    <strong>Рекомендации для SEO-тегов</strong>
+                    <p class="ucg-muted">Title: до 60-70 символов, Description: до 140-160 символов. Ограничения лучше указывать в самих промптах.</p>
                 </div>
 
                 <div class="ucg-grid-2 ucg-model-controls">

@@ -4,7 +4,7 @@ Tags: ai, content generation, seo, woocommerce, ecommerce
 Requires at least: 5.8
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 0.2.9.2
+Stable tag: 0.2.9.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -46,6 +46,13 @@ Yes. Use generation mode with review workflow and approve/reject in bulk.
 Russian and English are supported in the admin interface.
 
 == Changelog ==
+
+= 0.2.9.5 =
+
+* Hidden generic "Text length" controls in Generate wizard for SEO-tags scenario to reduce confusion
+* Added SEO-specific guidance block (title/description recommended lengths)
+* Variables groups in wizard are now expanded by default
+* Run summary label is scenario-aware for SEO package pricing
 
 = 0.2.9.2 =
 

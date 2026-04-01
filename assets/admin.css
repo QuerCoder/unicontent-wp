@@ -394,6 +394,28 @@ body.ucg-review-modal-open {
     align-items: start;
 }
 
+.ucg-seo-guidelines {
+    max-width: 680px;
+    margin-top: 2px;
+    border: 1px solid rgba(240, 106, 54, 0.24);
+    border-radius: 12px;
+    background: rgba(255, 247, 239, 0.9);
+    padding: 10px 12px;
+    display: grid;
+    gap: 4px;
+}
+
+.ucg-seo-guidelines strong {
+    font-size: 13px;
+    color: var(--ucg-text-primary);
+}
+
+.ucg-seo-guidelines p {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
 .ucg-model-unit-hint-wrap {
     display: flex;
     align-items: center;
