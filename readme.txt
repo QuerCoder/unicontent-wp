@@ -4,7 +4,7 @@ Tags: ai, content generation, seo, woocommerce, ecommerce
 Requires at least: 5.8
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 0.2.9.5
+Stable tag: 0.2.9.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -46,6 +46,11 @@ Yes. Use generation mode with review workflow and approve/reject in bulk.
 Russian and English are supported in the admin interface.
 
 == Changelog ==
+
+= 0.2.9.6 =
+
+* Removed duplicate “planned records” info message on Generate step 3 (single source of truth is run summary)
+* Simplified model display in run summary to avoid duplicated provider names (example: `DeepSeek (deepseek-chat)`)
 
 = 0.2.9.5 =
 

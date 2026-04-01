@@ -1372,14 +1372,8 @@ jQuery(function ($) {
             $('.ucg-step-panel[data-step="' + step + '"]').addClass('is-active');
 
             if (step === 3) {
-                const planned = getPlannedCount();
-                if (planned > 0) {
-                    if (getSelectionMode() === 'filtered') {
-                        setRunStatus(jsT('К запуску найдено записей: ') + planned + '.', false);
-                    } else {
-                        setRunStatus(jsT('К запуску выбрано записей: ') + planned + '.', false);
-                    }
-                }
+                renderRunSummary();
+                setRunStatus('', false);
             }
 
             if (step === 2 && state.total === 0 && normalizeFilters().length === 0) {
@@ -1633,12 +1627,15 @@ jQuery(function ($) {
                 ? jsT('Стоимость за SEO-пакет')
                 : jsT('Стоимость за единицу');
 
-            let modelDetails = modelName;
-            if (provider) {
-                modelDetails += ' (' + provider + ')';
+            let modelBase = modelName || provider || jsT('По умолчанию');
+            const providerSuffix = provider ? (' (' + provider + ')') : '';
+            if (providerSuffix && modelBase.toLowerCase().endsWith(providerSuffix.toLowerCase())) {
+                modelBase = modelBase.slice(0, -providerSuffix.length).trim();
             }
-            if (resolved) {
-                modelDetails += ' · ' + resolved;
+
+            let modelDetails = modelBase;
+            if (resolved && modelDetails.toLowerCase().indexOf(resolved.toLowerCase()) === -1) {
+                modelDetails += ' (' + resolved + ')';
             }
 
             let html = '' +
@@ -2288,11 +2285,6 @@ jQuery(function ($) {
                     return;
                 }
                 switchStep(3);
-                if (getSelectionMode() === 'filtered') {
-                    setRunStatus(jsT('К запуску найдено записей: ') + planned + '.', false);
-                } else {
-                    setRunStatus(jsT('К запуску выбрано записей: ') + planned + '.', false);
-                }
             });
 
             $('#ucg-step-3-back').on('click', function () {
