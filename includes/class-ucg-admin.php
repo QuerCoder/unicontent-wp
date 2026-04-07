@@ -1823,6 +1823,26 @@ if (!class_exists('UCG_Admin')) {
                 array('value' => 'post_excerpt', 'label' => __('Краткое описание (post_excerpt)', 'unicontent-ai-generator')),
             );
 
+            $taxonomies = get_object_taxonomies($post_type, 'objects');
+            if (is_array($taxonomies)) {
+                foreach ($taxonomies as $taxonomy => $taxonomy_obj) {
+                    if (!is_object($taxonomy_obj)) {
+                        continue;
+                    }
+                    $taxonomy_name = sanitize_key((string) $taxonomy);
+                    if ($taxonomy_name === '') {
+                        continue;
+                    }
+                    $taxonomy_label = isset($taxonomy_obj->labels->singular_name) && (string) $taxonomy_obj->labels->singular_name !== ''
+                        ? (string) $taxonomy_obj->labels->singular_name
+                        : $taxonomy_name;
+                    $fields[] = array(
+                        'value' => 'tax:' . $taxonomy_name,
+                        'label' => sprintf(__('Таксономия: %1$s (%2$s)', 'unicontent-ai-generator'), $taxonomy_label, $taxonomy_name),
+                    );
+                }
+            }
+
             $target_fields = UCG_Tokens::get_target_fields_for_post_type($post_type);
             foreach ($target_fields as $field_item) {
                 if (empty($field_item['value']) || strpos((string) $field_item['value'], 'post:') === 0) {
@@ -1888,6 +1908,7 @@ if (!class_exists('UCG_Admin')) {
             }
 
             $allowed_operators = array('is_empty', 'not_empty', 'contains', 'not_contains', 'equals', 'not_equals', 'gt', 'gte', 'lt', 'lte');
+            $allowed_taxonomy_operators = array('is_empty', 'not_empty', 'contains', 'not_contains', 'equals', 'not_equals');
             $result = array();
 
             foreach ($decoded as $row) {
@@ -1903,6 +1924,9 @@ if (!class_exists('UCG_Admin')) {
                     continue;
                 }
                 if (!in_array($operator, $allowed_operators, true)) {
+                    continue;
+                }
+                if (strpos($field, 'tax:') === 0 && !in_array($operator, $allowed_taxonomy_operators, true)) {
                     continue;
                 }
 
@@ -2001,6 +2025,107 @@ if (!class_exists('UCG_Admin')) {
                 $field = (string) $filter['field'];
                 $operator = sanitize_key((string) $filter['operator']);
                 $value = isset($filter['value']) ? (string) $filter['value'] : '';
+
+                $is_tax_field = strpos($field, 'tax:') === 0;
+                if ($is_tax_field) {
+                    $taxonomy = sanitize_key(substr($field, 4));
+                    if ($taxonomy === '' || !taxonomy_exists($taxonomy)) {
+                        continue;
+                    }
+
+                    $term_relationships_table = $wpdb->term_relationships;
+                    $term_taxonomy_table = $wpdb->term_taxonomy;
+                    $terms_table = $wpdb->terms;
+
+                    if ($operator === 'is_empty') {
+                        $where[] = "NOT EXISTS (
+                            SELECT 1
+                            FROM {$term_relationships_table} tr
+                            INNER JOIN {$term_taxonomy_table} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
+                            WHERE tr.object_id = p.ID
+                              AND tt.taxonomy = %s
+                        )";
+                        $params[] = $taxonomy;
+                        continue;
+                    }
+
+                    if ($operator === 'not_empty') {
+                        $where[] = "EXISTS (
+                            SELECT 1
+                            FROM {$term_relationships_table} tr
+                            INNER JOIN {$term_taxonomy_table} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
+                            WHERE tr.object_id = p.ID
+                              AND tt.taxonomy = %s
+                        )";
+                        $params[] = $taxonomy;
+                        continue;
+                    }
+
+                    $slug_value = sanitize_title($value);
+                    if ($operator === 'contains') {
+                        $where[] = "EXISTS (
+                            SELECT 1
+                            FROM {$term_relationships_table} tr
+                            INNER JOIN {$term_taxonomy_table} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
+                            INNER JOIN {$terms_table} t ON t.term_id = tt.term_id
+                            WHERE tr.object_id = p.ID
+                              AND tt.taxonomy = %s
+                              AND (t.name LIKE %s OR t.slug LIKE %s)
+                        )";
+                        $params[] = $taxonomy;
+                        $params[] = '%' . $wpdb->esc_like($value) . '%';
+                        $params[] = '%' . $wpdb->esc_like($value) . '%';
+                        continue;
+                    }
+
+                    if ($operator === 'not_contains') {
+                        $where[] = "NOT EXISTS (
+                            SELECT 1
+                            FROM {$term_relationships_table} tr
+                            INNER JOIN {$term_taxonomy_table} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
+                            INNER JOIN {$terms_table} t ON t.term_id = tt.term_id
+                            WHERE tr.object_id = p.ID
+                              AND tt.taxonomy = %s
+                              AND (t.name LIKE %s OR t.slug LIKE %s)
+                        )";
+                        $params[] = $taxonomy;
+                        $params[] = '%' . $wpdb->esc_like($value) . '%';
+                        $params[] = '%' . $wpdb->esc_like($value) . '%';
+                        continue;
+                    }
+
+                    if ($operator === 'equals') {
+                        $where[] = "EXISTS (
+                            SELECT 1
+                            FROM {$term_relationships_table} tr
+                            INNER JOIN {$term_taxonomy_table} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
+                            INNER JOIN {$terms_table} t ON t.term_id = tt.term_id
+                            WHERE tr.object_id = p.ID
+                              AND tt.taxonomy = %s
+                              AND (t.name = %s OR t.slug = %s)
+                        )";
+                        $params[] = $taxonomy;
+                        $params[] = $value;
+                        $params[] = $slug_value;
+                        continue;
+                    }
+
+                    if ($operator === 'not_equals') {
+                        $where[] = "NOT EXISTS (
+                            SELECT 1
+                            FROM {$term_relationships_table} tr
+                            INNER JOIN {$term_taxonomy_table} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
+                            INNER JOIN {$terms_table} t ON t.term_id = tt.term_id
+                            WHERE tr.object_id = p.ID
+                              AND tt.taxonomy = %s
+                              AND (t.name = %s OR t.slug = %s)
+                        )";
+                        $params[] = $taxonomy;
+                        $params[] = $value;
+                        $params[] = $slug_value;
+                    }
+                    continue;
+                }
 
                 $is_meta_field = strpos($field, 'meta:') === 0 || strpos($field, 'acf:') === 0;
                 if ($is_meta_field) {

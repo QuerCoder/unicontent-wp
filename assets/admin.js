@@ -1818,9 +1818,76 @@ jQuery(function ($) {
             return operators;
         }
 
+        function isTaxonomyFilterField(fieldValue) {
+            return String(fieldValue || '').indexOf('tax:') === 0;
+        }
+
+        function availableOperatorsForField(fieldValue) {
+            const operators = availableOperators();
+            if (!isTaxonomyFilterField(fieldValue)) {
+                return operators;
+            }
+
+            const allowed = {
+                is_empty: true,
+                not_empty: true,
+                contains: true,
+                not_contains: true,
+                equals: true,
+                not_equals: true
+            };
+
+            return operators.filter(function (op) {
+                const value = op && op.value ? String(op.value) : '';
+                return !!allowed[value];
+            });
+        }
+
+        function renderFilterOperatorOptions($row, preferredOperator) {
+            if (!$row || !$row.length) {
+                return;
+            }
+
+            const fieldValue = String($row.find('.ucg-filter-field').val() || '');
+            const operators = availableOperatorsForField(fieldValue);
+            const sourceOperators = operators.length ? operators : availableOperators();
+            const $operator = $row.find('.ucg-filter-operator');
+            let selectedOperator = String(typeof preferredOperator !== 'undefined' ? preferredOperator : ($operator.val() || ''));
+            let selectedExists = false;
+            let html = '';
+
+            sourceOperators.forEach(function (op) {
+                const value = op && op.value ? String(op.value) : '';
+                if (!value) {
+                    return;
+                }
+                const label = op && op.label ? String(op.label) : value;
+                if (value === selectedOperator) {
+                    selectedExists = true;
+                }
+                html += '<option value="' + escapeHtml(value) + '">' + escapeHtml(label) + '</option>';
+            });
+
+            if (!selectedExists) {
+                const first = sourceOperators[0] && sourceOperators[0].value ? String(sourceOperators[0].value) : '';
+                selectedOperator = first;
+            }
+
+            destroyEnhancedSelectInstance($operator);
+            $operator.html(html);
+            if (selectedOperator) {
+                $operator.val(selectedOperator);
+            }
+            initEnhancedSelects($operator);
+            updateFilterRowInputVisibility($row);
+        }
+
         function renderFilterRow(filter) {
             const fields = Array.isArray(state.schema.filter_fields) ? state.schema.filter_fields : [];
-            const operators = availableOperators();
+            let selectedFieldValue = filter && filter.field ? String(filter.field) : '';
+            if (!selectedFieldValue && fields.length) {
+                selectedFieldValue = fields[0] && fields[0].value ? String(fields[0].value) : '';
+            }
 
             let fieldHtml = '';
             fields.forEach(function (field) {
@@ -1829,10 +1896,13 @@ jQuery(function ($) {
                     return;
                 }
                 const label = field && field.label ? String(field.label) : value;
-                const selected = filter && filter.field === value ? ' selected' : '';
+                const selected = selectedFieldValue === value ? ' selected' : '';
                 fieldHtml += '<option value="' + escapeHtml(value) + '"' + selected + '>' + escapeHtml(label) + '</option>';
             });
 
+            const operators = availableOperatorsForField(selectedFieldValue);
+            let selectedOperator = filter && filter.operator ? String(filter.operator) : '';
+            let selectedOperatorExists = false;
             let opHtml = '';
             operators.forEach(function (op) {
                 const value = op && op.value ? String(op.value) : '';
@@ -1840,9 +1910,15 @@ jQuery(function ($) {
                     return;
                 }
                 const label = op && op.label ? String(op.label) : value;
-                const selected = filter && filter.operator === value ? ' selected' : '';
+                if (selectedOperator === value) {
+                    selectedOperatorExists = true;
+                }
+                const selected = selectedOperator === value ? ' selected' : '';
                 opHtml += '<option value="' + escapeHtml(value) + '"' + selected + '>' + escapeHtml(label) + '</option>';
             });
+            if (!selectedOperatorExists && operators.length) {
+                selectedOperator = operators[0] && operators[0].value ? String(operators[0].value) : '';
+            }
 
             const value = filter && typeof filter.value !== 'undefined' ? String(filter.value) : '';
             const rowHtml = '' +
@@ -1855,15 +1931,20 @@ jQuery(function ($) {
 
             $filterRows.append(rowHtml);
             const $newRow = $filterRows.find('.ucg-filter-row-item').last();
+            if (selectedOperator) {
+                $newRow.find('.ucg-filter-operator').val(selectedOperator);
+            }
             updateFilterRowInputVisibility($newRow);
             initEnhancedSelects($newRow);
         }
 
         function updateFilterRowInputVisibility($row) {
             const operator = String($row.find('.ucg-filter-operator').val() || '');
+            const field = String($row.find('.ucg-filter-field').val() || '');
             const $value = $row.find('.ucg-filter-value');
             const hideValue = operator === 'is_empty' || operator === 'not_empty';
             $value.prop('disabled', hideValue).toggle(!hideValue);
+            $value.attr('placeholder', isTaxonomyFilterField(field) ? jsT('термин (название или slug)') : jsT('значение'));
         }
 
         function clearFilters() {
@@ -2347,6 +2428,10 @@ jQuery(function ($) {
 
             $(document).on('click', '.ucg-remove-filter-row', function () {
                 $(this).closest('.ucg-filter-row-item').remove();
+            });
+
+            $(document).on('change', '.ucg-filter-field', function () {
+                renderFilterOperatorOptions($(this).closest('.ucg-filter-row-item'));
             });
 
             $(document).on('change', '.ucg-filter-operator', function () {
