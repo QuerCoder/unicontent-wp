@@ -45,7 +45,10 @@ if (!class_exists('UCG_Tokens')) {
         }
 
         public static function has_woocommerce_support() {
-            return class_exists('WooCommerce') && post_type_exists('product');
+            // WooCommerce is usually detected by its main class, but some setups load it late.
+            // Be permissive and rely on core runtime helpers too.
+            $woo_loaded = class_exists('WooCommerce') || function_exists('WC') || function_exists('wc_get_product');
+            return $woo_loaded && post_type_exists('product');
         }
 
         public static function get_target_fields_for_post_type($post_type) {
