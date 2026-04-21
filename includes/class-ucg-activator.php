@@ -61,6 +61,7 @@ if (!class_exists('UCG_Activator')) {
                 id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
                 run_id BIGINT UNSIGNED NOT NULL,
                 post_id BIGINT UNSIGNED NOT NULL,
+                item_index INT UNSIGNED NOT NULL DEFAULT 1,
                 status VARCHAR(20) NOT NULL DEFAULT 'queued',
                 prompt LONGTEXT NULL,
                 generated_text LONGTEXT NULL,
@@ -73,7 +74,7 @@ if (!class_exists('UCG_Activator')) {
                 reviewed_at DATETIME NULL,
                 updated_at DATETIME NOT NULL,
                 PRIMARY KEY (id),
-                UNIQUE KEY run_post (run_id, post_id),
+                UNIQUE KEY run_post (run_id, post_id, item_index),
                 KEY run_status (run_id, status),
                 KEY status (status),
                 KEY post_id (post_id)
@@ -83,6 +84,8 @@ if (!class_exists('UCG_Activator')) {
             dbDelta($sql_runs);
             dbDelta($sql_items);
 
+            self::ensure_multi_items_per_post_schema();
+
             if (false === get_option(UCG_Settings::OPTION_KEY, false)) {
                 add_option(UCG_Settings::OPTION_KEY, UCG_Settings::defaults());
             }
@@ -90,6 +93,40 @@ if (!class_exists('UCG_Activator')) {
             add_filter('cron_schedules', array('UCG_Generator', 'register_cron_schedule'));
             UCG_Generator::ensure_worker_scheduled();
             update_option('ucg_version', UCG_VERSION, false);
+        }
+
+        protected static function ensure_multi_items_per_post_schema() {
+            global $wpdb;
+            $items_table = UCG_DB::table_run_items();
+
+            // Add missing column if dbDelta didn't.
+            $has_item_index = $wpdb->get_var("SHOW COLUMNS FROM {$items_table} LIKE 'item_index'");
+            if (!$has_item_index) {
+                $wpdb->query("ALTER TABLE {$items_table} ADD COLUMN item_index INT UNSIGNED NOT NULL DEFAULT 1 AFTER post_id");
+            }
+
+            // Ensure unique key is (run_id, post_id, item_index).
+            // dbDelta is not reliable for dropping/altering UNIQUE keys, so we do it manually.
+            $unique = $wpdb->get_results("SHOW INDEX FROM {$items_table} WHERE Key_name = 'run_post'", ARRAY_A);
+            $columns = array();
+            if (is_array($unique)) {
+                foreach ($unique as $row) {
+                    if (!empty($row['Column_name'])) {
+                        $columns[(int) $row['Seq_in_index']] = (string) $row['Column_name'];
+                    }
+                }
+            }
+            ksort($columns);
+            $normalized = array_values($columns);
+            $needs_update = empty($normalized) || $normalized !== array('run_id', 'post_id', 'item_index');
+
+            if ($needs_update) {
+                // Drop old key if exists, then add the correct one.
+                if (!empty($unique)) {
+                    $wpdb->query("ALTER TABLE {$items_table} DROP INDEX run_post");
+                }
+                $wpdb->query("ALTER TABLE {$items_table} ADD UNIQUE KEY run_post (run_id, post_id, item_index)");
+            }
         }
 
         public static function deactivate() {

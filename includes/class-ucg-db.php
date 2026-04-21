@@ -241,7 +241,7 @@ if (!class_exists('UCG_DB')) {
             return (int) $wpdb->insert_id;
         }
 
-        public static function add_run_items($run_id, $post_ids) {
+        public static function add_run_items($run_id, $post_ids, $items_per_post = 1) {
             global $wpdb;
 
             $run_id = (int) $run_id;
@@ -249,6 +249,7 @@ if (!class_exists('UCG_DB')) {
                 return 0;
             }
 
+            $items_per_post = max(1, min(50, (int) $items_per_post));
             $table = self::table_run_items();
             $count = 0;
             $now = current_time('mysql', true);
@@ -259,20 +260,22 @@ if (!class_exists('UCG_DB')) {
                     continue;
                 }
 
-                $ok = $wpdb->query(
-                    $wpdb->prepare(
-                        "INSERT IGNORE INTO {$table}
-                        (run_id, post_id, status, attempts, created_at, updated_at)
-                        VALUES (%d, %d, 'queued', 0, %s, %s)",
-                        $run_id,
-                        $post_id,
-                        $now,
-                        $now
-                    )
-                );
-
-                if ($ok) {
-                    $count++;
+                for ($index = 1; $index <= $items_per_post; $index++) {
+                    $ok = $wpdb->query(
+                        $wpdb->prepare(
+                            "INSERT IGNORE INTO {$table}
+                            (run_id, post_id, item_index, status, attempts, created_at, updated_at)
+                            VALUES (%d, %d, %d, 'queued', 0, %s, %s)",
+                            $run_id,
+                            $post_id,
+                            $index,
+                            $now,
+                            $now
+                        )
+                    );
+                    if ($ok) {
+                        $count++;
+                    }
                 }
             }
 

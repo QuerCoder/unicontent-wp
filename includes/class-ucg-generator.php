@@ -211,6 +211,9 @@ if (!class_exists('UCG_Generator')) {
             if (!in_array($generation_mode, array('review', 'publish'), true)) {
                 $generation_mode = 'review';
             }
+            if ($scenario === 'comments' || $scenario === 'woo_reviews') {
+                $generation_mode = 'review';
+            }
             $write_context = $this->build_write_context($scenario, $publish_date_from, $publish_date_to);
 
             if ($scenario === 'seo_tags') {

@@ -1042,7 +1042,10 @@ jQuery(function ($) {
         const $scenarioInputs = $('input[name="ucg-wizard-scenario"]');
         const $postType = $('#ucg-wizard-post-type');
         const $targetField = $('#ucg-wizard-target-field');
+        const $targetFieldWrap = $('#ucg-wizard-target-field-wrap');
         const $targetFieldLabel = $('#ucg-wizard-target-field-label');
+        const $itemsPerPostWrap = $('#ucg-wizard-items-per-post-wrap');
+        const $itemsPerPost = $('#ucg-wizard-items-per-post');
         const $templateSelect = $('#ucg-wizard-template');
         const $templateName = $('#ucg-wizard-template-name');
         const $templateNameWrap = $('#ucg-template-name-wrap');
@@ -1101,6 +1104,34 @@ jQuery(function ($) {
         function scenarioSupportsPublishDateRange(scenario) {
             const normalized = String(scenario || '').trim();
             return normalized === 'comments' || normalized === 'woo_reviews';
+        }
+
+        function scenarioSupportsItemsPerPost(scenario) {
+            const normalized = String(scenario || '').trim();
+            return normalized === 'comments' || normalized === 'woo_reviews';
+        }
+
+        function normalizeItemsPerPost(value) {
+            const parsed = Number(value || 1);
+            if (!Number.isFinite(parsed)) {
+                return 1;
+            }
+            return Math.max(1, Math.min(50, Math.round(parsed)));
+        }
+
+        function applyItemsPerPostVisibility(scenario) {
+            const enabled = scenarioSupportsItemsPerPost(scenario);
+            if ($itemsPerPostWrap.length) {
+                $itemsPerPostWrap.toggle(enabled);
+            }
+            if ($targetFieldWrap.length) {
+                $targetFieldWrap.toggle(!enabled);
+            }
+            if (!enabled) {
+                if ($itemsPerPost.length) {
+                    $itemsPerPost.val('1');
+                }
+            }
         }
 
         function normalizeDateInputValue(value) {
@@ -1193,6 +1224,7 @@ jQuery(function ($) {
                 $seoGuidelines.prop('hidden', !isSeo).toggle(isSeo);
             }
             togglePublishDateRangeControls(scenario);
+            applyItemsPerPostVisibility(scenario);
         }
 
         function setRunStatus(message, isError) {
@@ -1586,7 +1618,10 @@ jQuery(function ($) {
             const modelName = model && model.name ? String(model.name) : jsT('По умолчанию');
             const provider = model && model.provider ? String(model.provider) : '';
             const resolved = model && model.resolved_model ? String(model.resolved_model) : '';
-            let message = jsT('Оценка: ') + '~' + formatCreditsValue(credits, 2) + jsT(' кр/ед.');
+            const unitLabel = state.schema && state.schema.generation_unit_label
+                ? String(state.schema.generation_unit_label)
+                : jsT('1 единица');
+            let message = jsT('Оценка: ') + '~' + formatCreditsValue(credits, 2) + jsT(' кр за ') + unitLabel;
             message += ' • ' + modelName;
             if (provider) {
                 message += ' (' + provider + ')';
@@ -1596,9 +1631,6 @@ jQuery(function ($) {
             }
             $modelHint.text(message);
 
-            const unitLabel = state.schema && state.schema.generation_unit_label
-                ? String(state.schema.generation_unit_label)
-                : jsT('1 единица');
             if ($unitHint.length) {
                 $unitHint.text(jsT('Единица расчёта: ') + unitLabel);
             }
@@ -1612,10 +1644,12 @@ jQuery(function ($) {
 
             const scenario = getScenario();
             const planned = getPlannedCount();
+            const itemsPerPost = scenarioSupportsItemsPerPost(scenario) ? normalizeItemsPerPost($itemsPerPost.val()) : 1;
+            const plannedUnits = planned > 0 ? (planned * itemsPerPost) : 0;
             const lengthOptionId = Number($lengthOption.val() || 0);
             const model = activeModelItem();
             const creditsPerUnit = estimateCreditsByLength(model, lengthOptionId);
-            const totalCredits = planned > 0 ? (planned * creditsPerUnit) : 0;
+            const totalCredits = plannedUnits > 0 ? (plannedUnits * creditsPerUnit) : 0;
             const modelName = model && model.name ? String(model.name) : jsT('По умолчанию');
             const provider = model && model.provider ? String(model.provider) : '';
             const resolved = model && model.resolved_model ? String(model.resolved_model) : '';
@@ -1645,6 +1679,10 @@ jQuery(function ($) {
                 '</div>' +
                 '<div class="ucg-run-summary__grid">' +
                 '  <div class="ucg-run-summary__item"><span>' + escapeHtml(jsT('Записей')) + '</span><strong>' + escapeHtml(String(planned)) + '</strong></div>' +
+                (scenarioSupportsItemsPerPost(scenario)
+                    ? ('  <div class="ucg-run-summary__item"><span>' + escapeHtml(jsT('На запись')) + '</span><strong>' + escapeHtml(String(itemsPerPost)) + '</strong></div>'
+                        + '  <div class="ucg-run-summary__item"><span>' + escapeHtml(jsT('Всего единиц')) + '</span><strong>' + escapeHtml(String(plannedUnits)) + '</strong></div>')
+                    : '') +
                 '  <div class="ucg-run-summary__item"><span>' + escapeHtml(perUnitLabel) + '</span><strong>~' + escapeHtml(formatCreditsValue(creditsPerUnit, 2)) + ' ' + escapeHtml(jsT('кр.')) + '</strong></div>' +
                 '  <div class="ucg-run-summary__item"><span>' + escapeHtml(jsT('Модель')) + '</span><strong>' + escapeHtml(modelDetails) + '</strong></div>' +
                 '  <div class="ucg-run-summary__item"><span>' + escapeHtml(jsT('Режим выборки')) + '</span><strong>' + escapeHtml(scope) + '</strong></div>' +
@@ -1673,6 +1711,9 @@ jQuery(function ($) {
             if (!models.length) {
                 html = '<option value="auto">' + escapeHtml(jsT('По умолчанию')) + '</option>';
             } else {
+                const unitLabel = state.schema && state.schema.generation_unit_label
+                    ? String(state.schema.generation_unit_label)
+                    : jsT('1 единица');
                 models.forEach(function (item) {
                     if (!item || typeof item !== 'object') {
                         return;
@@ -1683,7 +1724,7 @@ jQuery(function ($) {
                         return;
                     }
                     const credits = estimateCreditsByLength(item, lengthOptionId);
-                    const label = name + ' — ~' + formatCreditsValue(credits, 2) + ' ' + jsT('кр/ед.');
+                    const label = name + ' — ~' + formatCreditsValue(credits, 2) + ' ' + jsT('кр за ') + unitLabel;
                     html += '<option value="' + escapeHtml(id) + '">' + escapeHtml(label) + '</option>';
                     if (id === currentModel) {
                         selectedExists = true;
@@ -2225,6 +2266,7 @@ jQuery(function ($) {
             const scenario = getScenario();
             const postType = String($postType.val() || '');
             const targetField = String($targetField.val() || '');
+            const itemsPerPost = scenarioSupportsItemsPerPost(scenario) ? normalizeItemsPerPost($itemsPerPost.val()) : 1;
             const templateId = Number($templateSelect.val() || 0);
             const templateName = String($templateName.val() || '').trim();
             const templateBody = String($templateBody.val() || '').trim();
@@ -2243,7 +2285,7 @@ jQuery(function ($) {
                 return;
             }
 
-            if (!targetField) {
+            if (!targetField && !scenarioSupportsItemsPerPost(scenario)) {
                 setRunStatus(jsT('Выберите целевое поле.'), true);
                 switchStep(1);
                 return;
@@ -2290,6 +2332,7 @@ jQuery(function ($) {
                 scenario: scenario,
                 post_type: postType,
                 target_field: targetField,
+                items_per_post: itemsPerPost,
                 model: model,
                 template_id: templateId,
                 template_name: templateName,
@@ -2333,6 +2376,18 @@ jQuery(function ($) {
         }
 
         function bindEvents() {
+            if ($itemsPerPost.length) {
+                $itemsPerPost.on('change keyup', function () {
+                    const scenario = getScenario();
+                    if (!scenarioSupportsItemsPerPost(scenario)) {
+                        return;
+                    }
+                    const normalized = normalizeItemsPerPost($(this).val());
+                    $(this).val(String(normalized));
+                    renderRunSummary();
+                });
+            }
+
             $('#ucg-step-1-next').on('click', function () {
                 const scenario = getScenario();
                 const postType = String($postType.val() || '');
@@ -2345,7 +2400,7 @@ jQuery(function ($) {
                     setRunStatus(jsT('Выберите тип записей.'), true);
                     return;
                 }
-                if (!targetField) {
+                if (!targetField && !scenarioSupportsItemsPerPost(scenario)) {
                     setRunStatus(jsT('Выберите целевое поле.'), true);
                     return;
                 }

@@ -1023,6 +1023,7 @@ if (!class_exists('UCG_Admin')) {
                 $this->get_request_string($_POST, 'scenario', self::DEFAULT_GENERATION_SCENARIO)
             );
             $target_field = sanitize_text_field($this->get_request_string($_POST, 'target_field', ''));
+            $items_per_post = $this->get_request_int($_POST, 'items_per_post', 1);
             $template_id = $this->get_request_int($_POST, 'template_id', 0);
             $template_name = sanitize_text_field($this->get_request_string($_POST, 'template_name', ''));
             $template_body = sanitize_textarea_field($this->get_request_string($_POST, 'template_body', ''));
@@ -1050,6 +1051,17 @@ if (!class_exists('UCG_Admin')) {
             if ($scenario === 'comments' && !post_type_supports($post_type, 'comments')) {
                 wp_send_json_error(array('message' => __('Выбранный тип записей не поддерживает комментарии.', 'unicontent-ai-generator')));
             }
+
+            // Comments / reviews can generate multiple items per post.
+            if ($scenario === 'comments' || $scenario === 'woo_reviews') {
+                $items_per_post = max(1, min(50, (int) $items_per_post));
+                if ($target_field === '') {
+                    $target_field = $scenario === 'comments' ? 'comment:publish' : 'woo_review:publish';
+                }
+            } else {
+                $items_per_post = 1;
+            }
+
             if ($this->scenario_supports_publish_date_range($scenario)) {
                 $publish_date_range = $this->normalize_publish_date_range(
                     $this->get_request_string($_POST, 'publish_date_from', ''),
@@ -1210,6 +1222,7 @@ if (!class_exists('UCG_Admin')) {
                 'vary_length' => $vary_length,
                 'publish_date_from' => $publish_date_from,
                 'publish_date_to' => $publish_date_to,
+                'items_per_post' => $items_per_post,
             );
 
             $run_id = UCG_DB::create_run($post_type, $target_field, $active_template_id, get_current_user_id(), $options);
@@ -1217,7 +1230,7 @@ if (!class_exists('UCG_Admin')) {
                 wp_send_json_error(array('message' => __('Не удалось создать запуск.', 'unicontent-ai-generator')));
             }
 
-            $added_items = UCG_DB::add_run_items($run_id, $post_ids);
+            $added_items = UCG_DB::add_run_items($run_id, $post_ids, $items_per_post);
             if ($added_items <= 0) {
                 UCG_DB::update_run(
                     $run_id,

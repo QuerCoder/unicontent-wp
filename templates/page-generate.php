@@ -94,7 +94,7 @@
                         </select>
                     </label>
 
-                    <label class="ucg-field">
+                    <label class="ucg-field" id="ucg-wizard-target-field-wrap">
                         <span id="ucg-wizard-target-field-label"><?php echo esc_html(isset($target_field_label) ? $target_field_label : 'Целевое поле'); ?></span>
                         <select
                             id="ucg-wizard-target-field"
@@ -116,6 +116,19 @@
                                 <?php endforeach; ?>
                             <?php endif; ?>
                         </select>
+                    </label>
+
+                    <label class="ucg-field" id="ucg-wizard-items-per-post-wrap" style="display:none;">
+                        <span>Количество на запись</span>
+                        <input
+                            type="number"
+                            id="ucg-wizard-items-per-post"
+                            min="1"
+                            max="50"
+                            step="1"
+                            value="1"
+                        >
+                        <p class="ucg-muted ucg-field-hint">Сколько комментариев/отзывов генерировать для каждой выбранной записи.</p>
                     </label>
 
                 </div>
