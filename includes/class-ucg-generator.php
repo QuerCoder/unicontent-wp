@@ -266,9 +266,6 @@ if (!class_exists('UCG_Generator')) {
             $style_language = 'auto';
             $style_tone = 'neutral';
             $style_uniqueness = 'medium';
-            $safety_no_medical_financial = 1;
-            $safety_no_competitors = 1;
-            $safety_no_caps = 1;
             $run_seed = '';
 
             if ($item_id <= 0 || $post_id <= 0 || $run_id <= 0) {
@@ -300,9 +297,6 @@ if (!class_exists('UCG_Generator')) {
                     $style_language = isset($options['style_language']) ? sanitize_key((string) $options['style_language']) : 'auto';
                     $style_tone = isset($options['style_tone']) ? sanitize_key((string) $options['style_tone']) : 'neutral';
                     $style_uniqueness = isset($options['style_uniqueness']) ? sanitize_key((string) $options['style_uniqueness']) : 'medium';
-                    $safety_no_medical_financial = !empty($options['safety_no_medical_financial']) ? 1 : 0;
-                    $safety_no_competitors = !empty($options['safety_no_competitors']) ? 1 : 0;
-                    $safety_no_caps = !empty($options['safety_no_caps']) ? 1 : 0;
                     $run_seed = isset($options['run_seed']) ? (string) $options['run_seed'] : '';
                 }
             }
@@ -344,9 +338,6 @@ if (!class_exists('UCG_Generator')) {
                 $style_language,
                 $style_tone,
                 $style_uniqueness,
-                $safety_no_medical_financial,
-                $safety_no_competitors,
-                $safety_no_caps,
                 $run_seed,
                 $run_id,
                 $post_id,
@@ -698,9 +689,6 @@ if (!class_exists('UCG_Generator')) {
             $style_language,
             $style_tone,
             $style_uniqueness,
-            $safety_no_medical_financial,
-            $safety_no_competitors,
-            $safety_no_caps,
             $run_seed,
             $run_id,
             $post_id,
@@ -752,21 +740,6 @@ if (!class_exists('UCG_Generator')) {
                 $blocks[] = 'Уникальность: низкая. Допускается более прямой стиль.\nUniqueness: low. More direct wording is ok.';
             } else {
                 $blocks[] = 'Уникальность: средняя. Старайся разнообразить формулировки.\nUniqueness: medium. Try to vary wording.';
-            }
-
-            // Safety.
-            $safety_lines = array();
-            if (!empty($safety_no_medical_financial)) {
-                $safety_lines[] = 'Запрещены медицинские и финансовые обещания/гарантии.\nNo medical or financial promises/guarantees.';
-            }
-            if (!empty($safety_no_competitors)) {
-                $safety_lines[] = 'Не упоминай конкурентов, бренды конкурентов и сравнения.\nDo not mention competitors or comparisons.';
-            }
-            if (!empty($safety_no_caps)) {
-                $safety_lines[] = 'Не используй CAPS (все буквы заглавные).\nDo not use ALL CAPS.';
-            }
-            if (!empty($safety_lines)) {
-                $blocks[] = implode("\n", $safety_lines);
             }
 
             // Anti-repeat: deterministic variation key for comments/reviews.

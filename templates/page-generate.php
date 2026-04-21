@@ -337,49 +337,41 @@
                     <p class="ucg-muted ucg-field-hint">Для WooCommerce отзывов: модель будет генерировать рейтинг в выбранном диапазоне.</p>
                 </div>
 
-                <div class="ucg-date-range-block" id="ucg-style-controls-wrap">
-                    <strong>Стиль генерации</strong>
-                    <div class="ucg-grid-3" style="margin-top:8px;">
-                        <label class="ucg-field">
-                            <span>Язык</span>
-                            <select id="ucg-wizard-language" class="ucg-enhanced-select" data-search-enabled="false">
-                                <option value="auto">Авто</option>
-                                <option value="ru">Русский</option>
-                                <option value="en">English</option>
-                            </select>
-                        </label>
-                        <label class="ucg-field">
-                            <span>Тон</span>
-                            <select id="ucg-wizard-tone" class="ucg-enhanced-select" data-search-enabled="false">
-                                <option value="neutral">Нейтральный</option>
-                                <option value="official">Официальный</option>
-                                <option value="friendly">Дружелюбный</option>
-                            </select>
-                        </label>
-                        <label class="ucg-field">
-                            <span>Уникальность</span>
-                            <select id="ucg-wizard-uniqueness" class="ucg-enhanced-select" data-search-enabled="false">
-                                <option value="low">Низкая</option>
-                                <option value="medium">Средняя</option>
-                                <option value="high">Высокая</option>
-                            </select>
-                        </label>
+                <div class="ucg-date-range-block ucg-advanced" id="ucg-style-controls-wrap">
+                    <button type="button" class="ucg-advanced__toggle" id="ucg-advanced-toggle" aria-expanded="false">
+                        <span>Дополнительно</span>
+                        <span class="ucg-advanced__chevron" aria-hidden="true"></span>
+                    </button>
+                    <div class="ucg-advanced__body" id="ucg-advanced-body" hidden>
+                        <strong>Стиль генерации</strong>
+                        <div class="ucg-grid-3" style="margin-top:8px;">
+                            <label class="ucg-field">
+                                <span>Язык</span>
+                                <select id="ucg-wizard-language" class="ucg-enhanced-select" data-search-enabled="false">
+                                    <option value="auto">Авто</option>
+                                    <option value="ru">Русский</option>
+                                    <option value="en">English</option>
+                                </select>
+                            </label>
+                            <label class="ucg-field">
+                                <span>Тон</span>
+                                <select id="ucg-wizard-tone" class="ucg-enhanced-select" data-search-enabled="false">
+                                    <option value="neutral">Нейтральный</option>
+                                    <option value="official">Официальный</option>
+                                    <option value="friendly">Дружелюбный</option>
+                                </select>
+                            </label>
+                            <label class="ucg-field">
+                                <span>Уникальность</span>
+                                <select id="ucg-wizard-uniqueness" class="ucg-enhanced-select" data-search-enabled="false">
+                                    <option value="low">Низкая</option>
+                                    <option value="medium">Средняя</option>
+                                    <option value="high">Высокая</option>
+                                </select>
+                            </label>
+                        </div>
+                        <p class="ucg-muted ucg-field-hint">По умолчанию берём значения из настроек. Можно изменить для конкретного запуска.</p>
                     </div>
-                    <div class="ucg-grid-3" style="margin-top:8px;">
-                        <label class="ucg-checkbox">
-                            <input type="checkbox" id="ucg-wizard-safety-no-medical-financial">
-                            <span>Запрет мед/фин обещаний</span>
-                        </label>
-                        <label class="ucg-checkbox">
-                            <input type="checkbox" id="ucg-wizard-safety-no-competitors">
-                            <span>Не упоминать конкурентов</span>
-                        </label>
-                        <label class="ucg-checkbox">
-                            <input type="checkbox" id="ucg-wizard-safety-no-caps">
-                            <span>Не использовать CAPS</span>
-                        </label>
-                    </div>
-                    <p class="ucg-muted ucg-field-hint">По умолчанию берём значения из настроек. Можно изменить для конкретного запуска.</p>
                 </div>
 
                 <div id="ucg-template-body-standard-wrap">
@@ -418,8 +410,17 @@
                 <div id="ucg-run-result" class="ucg-api-status" aria-live="polite"></div>
                 <div id="ucg-run-summary" class="ucg-run-summary" aria-live="polite"></div>
 
+                <div class="ucg-card" id="ucg-example-wrap" style="margin-top:12px; display:none;">
+                    <div class="ucg-actions-row" style="justify-content: space-between; align-items: center;">
+                        <strong>Пример результата</strong>
+                        <span class="ucg-muted" id="ucg-example-credits"></span>
+                    </div>
+                    <textarea id="ucg-example-output" class="large-text code" rows="8" readonly></textarea>
+                </div>
+
                 <div class="ucg-step-footer">
                     <button type="button" class="button" id="ucg-step-3-back">Назад</button>
+                    <button type="button" class="button" id="ucg-generate-example">Сгенерировать пример</button>
                     <button type="button" class="button button-primary" id="ucg-start-run">Запустить генерацию</button>
                 </div>
             </section>

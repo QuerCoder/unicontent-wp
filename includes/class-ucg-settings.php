@@ -24,9 +24,6 @@ if (!class_exists('UCG_Settings')) {
                 'default_language' => 'auto',
                 'default_tone' => 'neutral',
                 'default_uniqueness' => 'medium',
-                'safety_no_medical_financial' => 1,
-                'safety_no_competitors' => 1,
-                'safety_no_caps' => 1,
             );
         }
 
@@ -89,10 +86,6 @@ if (!class_exists('UCG_Settings')) {
                 $default_uniqueness = (string) $defaults['default_uniqueness'];
             }
 
-            $safety_no_medical_financial = !empty($input['safety_no_medical_financial']) ? 1 : 0;
-            $safety_no_competitors = !empty($input['safety_no_competitors']) ? 1 : 0;
-            $safety_no_caps = !empty($input['safety_no_caps']) ? 1 : 0;
-
             return array(
                 'api_base_url'      => $api_base_url,
                 'api_key'           => $api_key,
@@ -108,9 +101,6 @@ if (!class_exists('UCG_Settings')) {
                 'default_language' => $default_language,
                 'default_tone' => $default_tone,
                 'default_uniqueness' => $default_uniqueness,
-                'safety_no_medical_financial' => $safety_no_medical_financial,
-                'safety_no_competitors' => $safety_no_competitors,
-                'safety_no_caps' => $safety_no_caps,
             );
         }
 

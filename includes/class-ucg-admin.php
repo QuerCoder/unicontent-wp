@@ -28,6 +28,7 @@ if (!class_exists('UCG_Admin')) {
             add_action('wp_ajax_ucg_wizard_preview', array($this, 'ajax_wizard_preview'));
             add_action('wp_ajax_ucg_wizard_load_template', array($this, 'ajax_wizard_load_template'));
             add_action('wp_ajax_ucg_wizard_create_run', array($this, 'ajax_wizard_create_run'));
+            add_action('wp_ajax_ucg_wizard_example', array($this, 'ajax_wizard_example'));
             add_action('wp_ajax_ucg_run_status', array($this, 'ajax_run_status'));
             add_action('wp_ajax_ucg_process_now', array($this, 'ajax_process_now'));
             add_action('wp_ajax_ucg_search_runs', array($this, 'ajax_search_runs'));
@@ -982,9 +983,6 @@ if (!class_exists('UCG_Admin')) {
                 'default_language' => $default_language,
                 'default_tone' => $default_tone,
                 'default_uniqueness' => $default_uniqueness,
-                'safety_no_medical_financial' => !empty($_POST['safety_no_medical_financial']) ? 1 : 0,
-                'safety_no_competitors' => !empty($_POST['safety_no_competitors']) ? 1 : 0,
-                'safety_no_caps' => !empty($_POST['safety_no_caps']) ? 1 : 0,
             );
 
             UCG_Settings::update($values);
@@ -1219,9 +1217,6 @@ if (!class_exists('UCG_Admin')) {
             $style_language = sanitize_key($this->get_request_string($_POST, 'style_language', (string) UCG_Settings::get_option('default_language', 'auto')));
             $style_tone = sanitize_key($this->get_request_string($_POST, 'style_tone', (string) UCG_Settings::get_option('default_tone', 'neutral')));
             $style_uniqueness = sanitize_key($this->get_request_string($_POST, 'style_uniqueness', (string) UCG_Settings::get_option('default_uniqueness', 'medium')));
-            $safety_no_medical_financial = $this->get_request_int($_POST, 'safety_no_medical_financial', (int) UCG_Settings::get_option('safety_no_medical_financial', 1));
-            $safety_no_competitors = $this->get_request_int($_POST, 'safety_no_competitors', (int) UCG_Settings::get_option('safety_no_competitors', 1));
-            $safety_no_caps = $this->get_request_int($_POST, 'safety_no_caps', (int) UCG_Settings::get_option('safety_no_caps', 1));
             $save_template = !empty($_POST['save_template']) ? 1 : 0;
             $vary_length = !empty($_POST['vary_length']) ? 1 : 0;
             $publish_date_from = '';
@@ -1442,9 +1437,6 @@ if (!class_exists('UCG_Admin')) {
                 'style_language' => in_array($style_language, array('auto', 'ru', 'en'), true) ? $style_language : 'auto',
                 'style_tone' => in_array($style_tone, array('neutral', 'official', 'friendly'), true) ? $style_tone : 'neutral',
                 'style_uniqueness' => in_array($style_uniqueness, array('low', 'medium', 'high'), true) ? $style_uniqueness : 'medium',
-                'safety_no_medical_financial' => !empty($safety_no_medical_financial) ? 1 : 0,
-                'safety_no_competitors' => !empty($safety_no_competitors) ? 1 : 0,
-                'safety_no_caps' => !empty($safety_no_caps) ? 1 : 0,
             );
 
             if (empty($options['run_seed'])) {
@@ -1477,6 +1469,173 @@ if (!class_exists('UCG_Admin')) {
                     'queued' => $added_items,
                     'message' => sprintf(__('Запуск #%d создан. В очереди: %d.', 'unicontent-ai-generator'), $run_id, $added_items),
                     'progress_url' => admin_url('admin.php?page=ucg-run-progress&run_id=' . $run_id),
+                )
+            );
+        }
+
+        public function ajax_wizard_example() {
+            $this->guard_ajax();
+
+            if (!UCG_Settings::has_valid_api_key()) {
+                wp_send_json_error(array('message' => __('Сначала добавьте и проверьте API ключ.', 'unicontent-ai-generator')));
+            }
+
+            $post_type = sanitize_key($this->get_request_string($_POST, 'post_type', ''));
+            $scenario = $this->normalize_generation_scenario(
+                $this->get_request_string($_POST, 'scenario', self::DEFAULT_GENERATION_SCENARIO)
+            );
+            $target_field = sanitize_text_field($this->get_request_string($_POST, 'target_field', ''));
+            $selection_mode = sanitize_key($this->get_request_string($_POST, 'selection_mode', 'selected'));
+            $model = sanitize_key($this->get_request_string($_POST, 'model', 'auto'));
+            if ($model === '') {
+                $model = 'auto';
+            }
+            $vary_length = !empty($_POST['vary_length']) ? 1 : 0;
+            $length_option_id = $this->get_request_int($_POST, 'length_option_id', 0);
+            $rating_min = $this->get_request_int($_POST, 'rating_min', 1);
+            $rating_max = $this->get_request_int($_POST, 'rating_max', 5);
+
+            $style_language = sanitize_key($this->get_request_string($_POST, 'style_language', (string) UCG_Settings::get_option('default_language', 'auto')));
+            $style_tone = sanitize_key($this->get_request_string($_POST, 'style_tone', (string) UCG_Settings::get_option('default_tone', 'neutral')));
+            $style_uniqueness = sanitize_key($this->get_request_string($_POST, 'style_uniqueness', (string) UCG_Settings::get_option('default_uniqueness', 'medium')));
+
+            $template_body = sanitize_textarea_field($this->get_request_string($_POST, 'template_body', ''));
+            $template_body_seo_title = sanitize_textarea_field($this->get_request_string($_POST, 'template_body_seo_title', ''));
+            $template_body_seo_description = sanitize_textarea_field($this->get_request_string($_POST, 'template_body_seo_description', ''));
+
+            if ($post_type === '' || !post_type_exists($post_type)) {
+                wp_send_json_error(array('message' => __('Некорректный post type.', 'unicontent-ai-generator')));
+            }
+            if ($scenario === 'woo_reviews' && $post_type !== 'product') {
+                wp_send_json_error(array('message' => __('Для сценария отзывов WooCommerce выберите тип записей: Товар (product).', 'unicontent-ai-generator')));
+            }
+            if ($scenario === 'comments' && !post_type_supports($post_type, 'comments')) {
+                wp_send_json_error(array('message' => __('Выбранный тип записей не поддерживает комментарии.', 'unicontent-ai-generator')));
+            }
+
+            if ($scenario === 'comments' || $scenario === 'woo_reviews') {
+                if ($target_field === '') {
+                    $target_field = $scenario === 'comments' ? 'comment:publish' : 'woo_review:publish';
+                }
+            }
+
+            if ($length_option_id <= 0) {
+                wp_send_json_error(array('message' => __('Выберите диапазон длины текста.', 'unicontent-ai-generator')));
+            }
+
+            if ($scenario === 'seo_tags') {
+                if (trim($template_body_seo_title) === '' || trim($template_body_seo_description) === '') {
+                    wp_send_json_error(array('message' => __('Заполните шаблоны для SEO title и SEO description.', 'unicontent-ai-generator')));
+                }
+            } else {
+                if (trim($template_body) === '') {
+                    wp_send_json_error(array('message' => __('Текст шаблона не может быть пустым.', 'unicontent-ai-generator')));
+                }
+            }
+
+            $filters = $this->normalize_filters_from_request($this->get_request_string($_POST, 'filters', '[]'), $post_type);
+            $post_id = 0;
+            if ($selection_mode === 'filtered') {
+                $ids = $this->query_filtered_post_ids($post_type, $filters, 1, 0);
+                if (!empty($ids)) {
+                    $post_id = (int) $ids[0];
+                }
+            } else {
+                $selected_ids = $this->parse_ids_json($this->get_request_string($_POST, 'selected_ids', '[]'));
+                $ids = $this->validate_post_ids_for_type($selected_ids, $post_type);
+                if (!empty($ids)) {
+                    $post_id = (int) $ids[0];
+                }
+            }
+
+            if ($post_id <= 0) {
+                wp_send_json_error(array('message' => __('Не удалось выбрать запись для примера.', 'unicontent-ai-generator')));
+            }
+
+            $settings = UCG_Settings::get();
+            $base_system_prompt = isset($settings['system_prompt']) ? (string) $settings['system_prompt'] : '';
+            $max_tokens = isset($settings['max_tokens']) ? (int) $settings['max_tokens'] : 1500;
+
+            $run_seed = function_exists('wp_generate_uuid4') ? wp_generate_uuid4() : (string) wp_rand(100000, 999999) . '-' . time();
+            $generator = new UCG_Generator();
+            $system_prompt = method_exists($generator, 'build_effective_system_prompt')
+                ? $generator->build_effective_system_prompt(
+                    $base_system_prompt,
+                    $scenario,
+                    $style_language,
+                    $style_tone,
+                    $style_uniqueness,
+                    $run_seed,
+                    1,
+                    $post_id,
+                    1
+                )
+                : $base_system_prompt;
+
+            $api_client = new UCG_Api_Client();
+
+            if ($scenario === 'seo_tags') {
+                $seo_title_prompt = UCG_Tokens::render_prompt_for_post($template_body_seo_title, $post_id);
+                $seo_description_prompt = UCG_Tokens::render_prompt_for_post($template_body_seo_description, $post_id);
+
+                $seo_title_prompt = $generator->build_prompt_for_single_seo_field($seo_title_prompt, 'title');
+                $seo_description_prompt = $generator->build_prompt_for_single_seo_field($seo_description_prompt, 'description');
+
+                $r1 = $api_client->generate_text($seo_title_prompt, $system_prompt, $max_tokens, $length_option_id, $vary_length, $model);
+                if (is_wp_error($r1)) {
+                    wp_send_json_error(array('message' => $r1->get_error_message()));
+                }
+                $r2 = $api_client->generate_text($seo_description_prompt, $system_prompt, $max_tokens, $length_option_id, $vary_length, $model);
+                if (is_wp_error($r2)) {
+                    wp_send_json_error(array('message' => $r2->get_error_message()));
+                }
+
+                $credits_spent = (float) (isset($r1['credits_spent']) ? $r1['credits_spent'] : 0.0) + (float) (isset($r2['credits_spent']) ? $r2['credits_spent'] : 0.0);
+                $credits_remaining = isset($r2['credits_remaining']) ? (float) $r2['credits_remaining'] : (float) (isset($r1['credits_remaining']) ? $r1['credits_remaining'] : 0.0);
+
+                wp_send_json_success(
+                    array(
+                        'post_id' => $post_id,
+                        'scenario' => $scenario,
+                        'preview' => array(
+                            'title' => isset($r1['text']) ? (string) $r1['text'] : '',
+                            'description' => isset($r2['text']) ? (string) $r2['text'] : '',
+                        ),
+                        'credits_spent' => $credits_spent,
+                        'credits_remaining' => $credits_remaining,
+                    )
+                );
+            }
+
+            $prompt = UCG_Tokens::render_prompt_for_post($template_body, $post_id);
+            if (trim($prompt) === '') {
+                wp_send_json_error(array('message' => __('Промпт пустой после подстановки переменных.', 'unicontent-ai-generator')));
+            }
+
+            if ($scenario === 'woo_reviews') {
+                $rating_min = max(1, min(5, (int) $rating_min));
+                $rating_max = max(1, min(5, (int) $rating_max));
+                if ($rating_min > $rating_max) {
+                    $tmp = $rating_min;
+                    $rating_min = $rating_max;
+                    $rating_max = $tmp;
+                }
+            }
+
+            $prompt = $generator->build_prompt_for_comment_and_review_scenarios($prompt, $scenario, $rating_min, $rating_max);
+
+            $resp = $api_client->generate_text($prompt, $system_prompt, $max_tokens, $length_option_id, $vary_length, $model);
+            if (is_wp_error($resp)) {
+                wp_send_json_error(array('message' => $resp->get_error_message()));
+            }
+
+            wp_send_json_success(
+                array(
+                    'post_id' => $post_id,
+                    'scenario' => $scenario,
+                    'preview' => isset($resp['text']) ? (string) $resp['text'] : '',
+                    'credits_spent' => isset($resp['credits_spent']) ? (float) $resp['credits_spent'] : 0.0,
+                    'credits_remaining' => isset($resp['credits_remaining']) ? (float) $resp['credits_remaining'] : 0.0,
                 )
             );
         }
@@ -1571,9 +1730,6 @@ if (!class_exists('UCG_Admin')) {
                     'default_language' => isset($settings['default_language']) ? sanitize_key((string) $settings['default_language']) : 'auto',
                     'default_tone' => isset($settings['default_tone']) ? sanitize_key((string) $settings['default_tone']) : 'neutral',
                     'default_uniqueness' => isset($settings['default_uniqueness']) ? sanitize_key((string) $settings['default_uniqueness']) : 'medium',
-                    'safety_no_medical_financial' => !empty($settings['safety_no_medical_financial']) ? 1 : 0,
-                    'safety_no_competitors' => !empty($settings['safety_no_competitors']) ? 1 : 0,
-                    'safety_no_caps' => !empty($settings['safety_no_caps']) ? 1 : 0,
                 ),
                 'filter_fields' => $filter_fields,
                 'filter_operators' => array(

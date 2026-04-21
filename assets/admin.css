@@ -314,7 +314,7 @@ body.ucg-review-modal-open {
 .ucg-scenario-card__surface {
     display: grid;
     grid-template-columns: auto 1fr auto;
-    align-items: center;
+    align-items: start;
     gap: 10px;
     border: 1px solid var(--ucg-border);
     border-radius: 16px;
@@ -334,11 +334,13 @@ body.ucg-review-modal-open {
     width: 20px;
     height: 20px;
     color: var(--ucg-accent-strong);
+    margin-top: 2px;
 }
 
 .ucg-scenario-card__content {
     display: grid;
     gap: 4px;
+    align-content: start;
 }
 
 .ucg-scenario-card__label,
@@ -367,6 +369,7 @@ body.ucg-review-modal-open {
     white-space: normal;
     text-align: center;
     max-width: 120px;
+    align-self: start;
 }
 
 .ucg-scenario-card.is-selected .ucg-scenario-card__surface {
@@ -391,6 +394,43 @@ body.ucg-review-modal-open {
 .ucg-date-range-block {
     max-width: 680px;
     margin-top: 4px;
+    display: grid;
+    gap: 6px;
+}
+
+.ucg-advanced__toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--ucg-text-secondary);
+    font-weight: 600;
+    cursor: pointer;
+    justify-self: start;
+}
+
+.ucg-advanced__toggle:hover {
+    color: var(--ucg-text-primary);
+}
+
+.ucg-advanced__chevron {
+    width: 8px;
+    height: 8px;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(45deg);
+    transition: transform .16s ease;
+    margin-top: -2px;
+}
+
+.ucg-advanced.is-open .ucg-advanced__chevron {
+    transform: rotate(-135deg);
+    margin-top: 2px;
+}
+
+.ucg-advanced__body {
     display: grid;
     gap: 6px;
 }

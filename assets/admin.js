@@ -908,9 +908,6 @@ jQuery(function ($) {
         const $defaultLanguage = $('#ucg-default-language');
         const $defaultTone = $('#ucg-default-tone');
         const $defaultUniqueness = $('#ucg-default-uniqueness');
-        const $safetyNoMedFin = $('#ucg-safety-no-medical-financial');
-        const $safetyNoCompetitors = $('#ucg-safety-no-competitors');
-        const $safetyNoCaps = $('#ucg-safety-no-caps');
         if (!$batchInput.length || !$saveBatchButton.length) {
             return;
         }
@@ -969,10 +966,7 @@ jQuery(function ($) {
                     nonce: ucgAdmin.nonce,
                     default_language: String($defaultLanguage.val() || 'auto'),
                     default_tone: String($defaultTone.val() || 'neutral'),
-                    default_uniqueness: String($defaultUniqueness.val() || 'medium'),
-                    safety_no_medical_financial: ($safetyNoMedFin.is(':checked') ? 1 : 0),
-                    safety_no_competitors: ($safetyNoCompetitors.is(':checked') ? 1 : 0),
-                    safety_no_caps: ($safetyNoCaps.is(':checked') ? 1 : 0)
+                    default_uniqueness: String($defaultUniqueness.val() || 'medium')
                 }).done(function (response) {
                     if (!response.success) {
                         const msg = response.data && response.data.message ? response.data.message : jsT('Не удалось сохранить настройки.');
@@ -1173,9 +1167,6 @@ jQuery(function ($) {
         const $styleLanguage = $('#ucg-wizard-language');
         const $styleTone = $('#ucg-wizard-tone');
         const $styleUniqueness = $('#ucg-wizard-uniqueness');
-        const $safetyNoMedFin = $('#ucg-wizard-safety-no-medical-financial');
-        const $safetyNoCompetitors = $('#ucg-wizard-safety-no-competitors');
-        const $safetyNoCaps = $('#ucg-wizard-safety-no-caps');
         const $wizardTokenSearch = $('#ucg-wizard-token-search');
         const $tokens = $('#ucg-wizard-tokens');
         const $filterRows = $('#ucg-filter-rows');
@@ -1185,6 +1176,9 @@ jQuery(function ($) {
         const $selectedCount = $('#ucg-selected-count');
         const $runResult = $('#ucg-run-result');
         const $runSummary = $('#ucg-run-summary');
+        const $exampleWrap = $('#ucg-example-wrap');
+        const $exampleOutput = $('#ucg-example-output');
+        const $exampleCredits = $('#ucg-example-credits');
         const $runMonitor = $('#ucg-run-monitor');
         const $runMonitorTitle = $('#ucg-run-monitor-title');
         const $runMonitorStatus = $('#ucg-run-monitor-status');
@@ -2416,15 +2410,6 @@ jQuery(function ($) {
                     if ($styleUniqueness.length && s.default_uniqueness) {
                         setEnhancedSelectValue($styleUniqueness, String(s.default_uniqueness));
                     }
-                    if ($safetyNoMedFin.length) {
-                        $safetyNoMedFin.prop('checked', !!Number(s.safety_no_medical_financial || 0));
-                    }
-                    if ($safetyNoCompetitors.length) {
-                        $safetyNoCompetitors.prop('checked', !!Number(s.safety_no_competitors || 0));
-                    }
-                    if ($safetyNoCaps.length) {
-                        $safetyNoCaps.prop('checked', !!Number(s.safety_no_caps || 0));
-                    }
                 }
                 clearFilters();
                 state.selectedIds.clear();
@@ -2460,9 +2445,6 @@ jQuery(function ($) {
             const styleLanguage = String($styleLanguage.val() || (state.schema && state.schema.settings && state.schema.settings.default_language) || 'auto');
             const styleTone = String($styleTone.val() || (state.schema && state.schema.settings && state.schema.settings.default_tone) || 'neutral');
             const styleUniqueness = String($styleUniqueness.val() || (state.schema && state.schema.settings && state.schema.settings.default_uniqueness) || 'medium');
-            const safetyNoMedFin = $safetyNoMedFin.is(':checked') ? 1 : 0;
-            const safetyNoCompetitors = $safetyNoCompetitors.is(':checked') ? 1 : 0;
-            const safetyNoCaps = $safetyNoCaps.is(':checked') ? 1 : 0;
 
             if (!postType) {
                 setRunStatus(jsT('Выберите тип записей.'), true);
@@ -2528,9 +2510,6 @@ jQuery(function ($) {
                 style_language: styleLanguage,
                 style_tone: styleTone,
                 style_uniqueness: styleUniqueness,
-                safety_no_medical_financial: safetyNoMedFin,
-                safety_no_competitors: safetyNoCompetitors,
-                safety_no_caps: safetyNoCaps,
                 model: model,
                 template_id: templateId,
                 template_name: templateName,
@@ -2573,7 +2552,140 @@ jQuery(function ($) {
             });
         }
 
+        function generateExample($button) {
+            const scenario = getScenario();
+            const postType = String($postType.val() || '');
+            const targetField = String($targetField.val() || '');
+            const wooRatingRange = collectWooRatingRangeForRun(scenario);
+            const templateBody = String($templateBody.val() || '').trim();
+            const templateBodySeoTitle = String($templateBodySeoTitle.val() || '').trim();
+            const templateBodySeoDescription = String($templateBodySeoDescription.val() || '').trim();
+            const mode = getSelectionMode();
+            const filters = normalizeFilters();
+            const lengthOptionId = Number($lengthOption.val() || 0);
+            const model = String($modelSelect.val() || state.defaultModel || 'auto');
+            const varyLength = $varyLength.is(':checked') ? 1 : 0;
+            const styleLanguage = String($styleLanguage.val() || (state.schema && state.schema.settings && state.schema.settings.default_language) || 'auto');
+            const styleTone = String($styleTone.val() || (state.schema && state.schema.settings && state.schema.settings.default_tone) || 'neutral');
+            const styleUniqueness = String($styleUniqueness.val() || (state.schema && state.schema.settings && state.schema.settings.default_uniqueness) || 'medium');
+
+            if (!postType) {
+                setRunStatus(jsT('Выберите тип записей.'), true);
+                switchStep(1);
+                return;
+            }
+            if (!wooRatingRange.valid) {
+                setRunStatus(wooRatingRange.message || jsT('Проверьте диапазон рейтинга.'), true);
+                return;
+            }
+            if (lengthOptionId <= 0) {
+                setRunStatus(jsT('Выберите диапазон длины текста.'), true);
+                return;
+            }
+            if (scenario === 'seo_tags') {
+                if (!templateBodySeoTitle || !templateBodySeoDescription) {
+                    setRunStatus(jsT('Заполните шаблоны для SEO title и SEO description.'), true);
+                    return;
+                }
+            } else if (!templateBody) {
+                setRunStatus(jsT('Шаблон пустой. Заполните текст.'), true);
+                return;
+            }
+
+            setButtonLoading($button, true);
+            setRunStatus(jsT('Генерируем пример...'), false);
+
+            $.post(ucgAdmin.ajaxUrl, {
+                action: 'ucg_wizard_example',
+                nonce: ucgAdmin.nonce,
+                scenario: scenario,
+                post_type: postType,
+                target_field: targetField,
+                model: model,
+                template_body: templateBody,
+                template_body_seo_title: templateBodySeoTitle,
+                template_body_seo_description: templateBodySeoDescription,
+                length_option_id: lengthOptionId,
+                vary_length: varyLength,
+                rating_min: wooRatingRange.ratingMin,
+                rating_max: wooRatingRange.ratingMax,
+                style_language: styleLanguage,
+                style_tone: styleTone,
+                style_uniqueness: styleUniqueness,
+                selection_mode: mode,
+                selected_ids: JSON.stringify(Array.from(state.selectedIds)),
+                filters: JSON.stringify(filters)
+            }).done(function (response) {
+                if (!response.success) {
+                    const msg = response.data && response.data.message ? response.data.message : jsT('Не удалось сгенерировать пример.');
+                    setRunStatus(msg, true);
+                    return;
+                }
+                const data = response.data || {};
+                const preview = data.preview;
+                let text = '';
+                if (preview && typeof preview === 'object' && (preview.title || preview.description)) {
+                    text = 'SEO title:\n' + String(preview.title || '') + '\n\nSEO description:\n' + String(preview.description || '');
+                } else {
+                    text = String(preview || '');
+                }
+                if ($exampleOutput.length) {
+                    $exampleOutput.val(text);
+                }
+                if ($exampleCredits.length) {
+                    const spent = Number(data.credits_spent || 0);
+                    const remaining = Number(data.credits_remaining || 0);
+                    $exampleCredits.text(jsT('Списано: ') + spent + jsT(' • Осталось: ') + remaining);
+                }
+                if ($exampleWrap.length) {
+                    $exampleWrap.show();
+                }
+                // Refresh balance if the header widget exists.
+                if ($('.ucg-balance-value').length) {
+                    fetchBalance(false, $('#ucg-refresh-balance'));
+                }
+                setRunStatus(jsT('Пример готов.'), false);
+            }).fail(function () {
+                setRunStatus(jsT('AJAX ошибка при генерации примера.'), true);
+            }).always(function () {
+                setButtonLoading($button, false);
+            });
+        }
+
         function bindEvents() {
+            const $advancedToggle = $('#ucg-advanced-toggle');
+            const $advancedBody = $('#ucg-advanced-body');
+            const $advancedWrap = $('.ucg-advanced');
+
+            if ($advancedToggle.length && $advancedBody.length) {
+                const storageKey = 'ucg_wizard_advanced_open_v1';
+                const initialOpen = window.localStorage ? (window.localStorage.getItem(storageKey) === '1') : false;
+                if (initialOpen) {
+                    $advancedWrap.addClass('is-open');
+                    $advancedToggle.attr('aria-expanded', 'true');
+                    $advancedBody.prop('hidden', false).show();
+                }
+
+                $advancedToggle.on('click', function () {
+                    const isOpen = $advancedWrap.hasClass('is-open');
+                    if (isOpen) {
+                        $advancedWrap.removeClass('is-open');
+                        $advancedToggle.attr('aria-expanded', 'false');
+                        $advancedBody.prop('hidden', true).hide();
+                        if (window.localStorage) {
+                            window.localStorage.setItem(storageKey, '0');
+                        }
+                        return;
+                    }
+                    $advancedWrap.addClass('is-open');
+                    $advancedToggle.attr('aria-expanded', 'true');
+                    $advancedBody.prop('hidden', false).show();
+                    if (window.localStorage) {
+                        window.localStorage.setItem(storageKey, '1');
+                    }
+                });
+            }
+
             if ($itemsPerPost.length) {
                 $itemsPerPost.on('change keyup', function () {
                     const scenario = getScenario();
@@ -2763,6 +2875,10 @@ jQuery(function ($) {
 
             $('#ucg-start-run').on('click', function () {
                 startRun($(this));
+            });
+
+            $('#ucg-generate-example').on('click', function () {
+                generateExample($(this));
             });
 
             $(document).on('click', '#ucg-wizard-tokens .ucg-token-btn', function () {

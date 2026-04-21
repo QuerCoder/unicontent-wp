@@ -106,20 +106,6 @@
                 </select>
             </label>
 
-            <h4 style="margin: 14px 0 6px;">Ограничения</h4>
-            <label class="ucg-checkbox">
-                <input type="checkbox" id="ucg-safety-no-medical-financial" <?php checked(!empty($settings['safety_no_medical_financial'])); ?>>
-                <span>Запрет мед/фин обещаний</span>
-            </label>
-            <label class="ucg-checkbox">
-                <input type="checkbox" id="ucg-safety-no-competitors" <?php checked(!empty($settings['safety_no_competitors'])); ?>>
-                <span>Не упоминать конкурентов</span>
-            </label>
-            <label class="ucg-checkbox">
-                <input type="checkbox" id="ucg-safety-no-caps" <?php checked(!empty($settings['safety_no_caps'])); ?>>
-                <span>Не использовать CAPS</span>
-            </label>
-
             <div class="ucg-actions-row ucg-actions-row--footer">
                 <button type="button" class="button ucg-btn ucg-btn--primary" id="ucg-save-style-defaults">Сохранить</button>
             </div>
