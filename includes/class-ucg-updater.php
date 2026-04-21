@@ -57,6 +57,11 @@ if (!class_exists('UCG_Updater')) {
                 }
             }
 
+            if (class_exists('UCG_Logger')) {
+                $msg = is_wp_error($response) ? $response->get_error_message() : ('HTTP ' . (int) wp_remote_retrieve_response_code($response));
+                UCG_Logger::warn('updater', 'server_check_failed', 'Server update check failed.', array('message' => (string) $msg));
+            }
+
             return null;
         }
 
@@ -70,11 +75,18 @@ if (!class_exists('UCG_Updater')) {
             ]);
 
             if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
+                if (class_exists('UCG_Logger')) {
+                    $msg = is_wp_error($response) ? $response->get_error_message() : ('HTTP ' . (int) wp_remote_retrieve_response_code($response));
+                    UCG_Logger::warn('updater', 'github_check_failed', 'GitHub update check failed.', array('message' => (string) $msg));
+                }
                 return null;
             }
 
             $data = json_decode(wp_remote_retrieve_body($response));
             if (empty($data->tag_name)) {
+                if (class_exists('UCG_Logger')) {
+                    UCG_Logger::warn('updater', 'github_no_tag', 'GitHub release has no tag_name.', array());
+                }
                 return null;
             }
 

@@ -21,6 +21,143 @@ if (!class_exists('UCG_DB')) {
             return self::resolve_table_name('ucg_run_items');
         }
 
+        public static function table_logs() {
+            return self::resolve_table_name('ucg_logs');
+        }
+
+        public static function insert_log($level, $area, $event, $message, $context_json = '', $run_id = null, $item_id = null, $post_id = null) {
+            global $wpdb;
+
+            $table = self::table_logs();
+            $level = sanitize_key((string) $level);
+            if (!in_array($level, array('info', 'warn', 'error'), true)) {
+                $level = 'info';
+            }
+            $area = sanitize_key((string) $area);
+            if ($area === '') {
+                $area = 'general';
+            }
+            $event = sanitize_key((string) $event);
+            if ($event === '') {
+                $event = 'event';
+            }
+
+            $message = trim((string) $message);
+            if ($message === '') {
+                return 0;
+            }
+
+            $payload = array(
+                'created_at' => current_time('mysql', true),
+                'level' => $level,
+                'area' => $area,
+                'event' => $event,
+                'message' => $message,
+                'context_json' => (string) $context_json,
+                'run_id' => $run_id !== null ? (int) $run_id : null,
+                'item_id' => $item_id !== null ? (int) $item_id : null,
+                'post_id' => $post_id !== null ? (int) $post_id : null,
+            );
+
+            $ok = $wpdb->insert(
+                $table,
+                $payload,
+                array('%s', '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%d')
+            );
+
+            return $ok ? (int) $wpdb->insert_id : 0;
+        }
+
+        public static function get_logs($filters = array(), $limit = 200) {
+            global $wpdb;
+
+            $filters = is_array($filters) ? $filters : array();
+            $limit = max(1, min(2000, (int) $limit));
+            $table = self::table_logs();
+
+            $where = array('1=1');
+            $args = array();
+
+            $level = isset($filters['level']) ? sanitize_key((string) $filters['level']) : '';
+            if ($level !== '' && in_array($level, array('info', 'warn', 'error'), true)) {
+                $where[] = "level = %s";
+                $args[] = $level;
+            }
+
+            $area = isset($filters['area']) ? sanitize_key((string) $filters['area']) : '';
+            if ($area !== '') {
+                $where[] = "area = %s";
+                $args[] = $area;
+            }
+
+            $run_id = isset($filters['run_id']) ? (int) $filters['run_id'] : 0;
+            if ($run_id > 0) {
+                $where[] = "run_id = %d";
+                $args[] = $run_id;
+            }
+
+            $since = isset($filters['since']) ? trim((string) $filters['since']) : '';
+            if ($since !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $since)) {
+                $where[] = "created_at >= %s";
+                $args[] = $since . ' 00:00:00';
+            }
+
+            $until = isset($filters['until']) ? trim((string) $filters['until']) : '';
+            if ($until !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $until)) {
+                $where[] = "created_at <= %s";
+                $args[] = $until . ' 23:59:59';
+            }
+
+            $sql = "SELECT id, created_at, level, area, event, message, context_json, run_id, item_id, post_id
+                    FROM {$table}
+                    WHERE " . implode(' AND ', $where) . "
+                    ORDER BY id DESC
+                    LIMIT %d";
+            $args[] = $limit;
+
+            $prepared = $wpdb->prepare($sql, $args);
+            $rows = $wpdb->get_results($prepared, ARRAY_A);
+            return is_array($rows) ? $rows : array();
+        }
+
+        public static function delete_logs_older_than_days($days) {
+            global $wpdb;
+            $days = max(1, min(365, (int) $days));
+            $table = self::table_logs();
+            return (int) $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$table} WHERE created_at < (UTC_TIMESTAMP() - INTERVAL %d DAY)",
+                    $days
+                )
+            );
+        }
+
+        public static function delete_logs_keep_latest($keep_latest) {
+            global $wpdb;
+            $keep_latest = max(100, min(100000, (int) $keep_latest));
+            $table = self::table_logs();
+            // Delete everything older than N newest rows.
+            $ids = $wpdb->get_col(
+                $wpdb->prepare(
+                    "SELECT id FROM {$table} ORDER BY id DESC LIMIT %d, 1",
+                    $keep_latest
+                )
+            );
+            if (empty($ids)) {
+                return 0;
+            }
+            $threshold = (int) $ids[0];
+            if ($threshold <= 0) {
+                return 0;
+            }
+            return (int) $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$table} WHERE id < %d",
+                    $threshold
+                )
+            );
+        }
+
         public static function create_template($name, $post_type, $body, $is_default = 0, $length_option_id = 0, $vary_length = 0, $scenario = 'field_update') {
             global $wpdb;
 

@@ -19,6 +19,14 @@ if (!class_exists('UCG_Settings')) {
                 'max_tokens'       => 1500,
                 'system_prompt'    => '',
                 'credits_cache_ttl'=> 60,
+                'logs_keep_latest' => 2000,
+                'logs_keep_days'   => 7,
+                'default_language' => 'auto',
+                'default_tone' => 'neutral',
+                'default_uniqueness' => 'medium',
+                'safety_no_medical_financial' => 1,
+                'safety_no_competitors' => 1,
+                'safety_no_caps' => 1,
             );
         }
 
@@ -60,6 +68,31 @@ if (!class_exists('UCG_Settings')) {
             $credits_cache_ttl = isset($input['credits_cache_ttl']) ? (int) $input['credits_cache_ttl'] : (int) $defaults['credits_cache_ttl'];
             $credits_cache_ttl = max(10, min(600, $credits_cache_ttl));
 
+            $logs_keep_latest = isset($input['logs_keep_latest']) ? (int) $input['logs_keep_latest'] : (int) $defaults['logs_keep_latest'];
+            $logs_keep_latest = max(200, min(100000, $logs_keep_latest));
+
+            $logs_keep_days = isset($input['logs_keep_days']) ? (int) $input['logs_keep_days'] : (int) $defaults['logs_keep_days'];
+            $logs_keep_days = max(1, min(365, $logs_keep_days));
+
+            $default_language = isset($input['default_language']) ? sanitize_key((string) $input['default_language']) : (string) $defaults['default_language'];
+            if (!in_array($default_language, array('auto', 'ru', 'en'), true)) {
+                $default_language = (string) $defaults['default_language'];
+            }
+
+            $default_tone = isset($input['default_tone']) ? sanitize_key((string) $input['default_tone']) : (string) $defaults['default_tone'];
+            if (!in_array($default_tone, array('neutral', 'official', 'friendly'), true)) {
+                $default_tone = (string) $defaults['default_tone'];
+            }
+
+            $default_uniqueness = isset($input['default_uniqueness']) ? sanitize_key((string) $input['default_uniqueness']) : (string) $defaults['default_uniqueness'];
+            if (!in_array($default_uniqueness, array('low', 'medium', 'high'), true)) {
+                $default_uniqueness = (string) $defaults['default_uniqueness'];
+            }
+
+            $safety_no_medical_financial = !empty($input['safety_no_medical_financial']) ? 1 : 0;
+            $safety_no_competitors = !empty($input['safety_no_competitors']) ? 1 : 0;
+            $safety_no_caps = !empty($input['safety_no_caps']) ? 1 : 0;
+
             return array(
                 'api_base_url'      => $api_base_url,
                 'api_key'           => $api_key,
@@ -70,6 +103,14 @@ if (!class_exists('UCG_Settings')) {
                 'max_tokens'        => $max_tokens,
                 'system_prompt'     => $system_prompt,
                 'credits_cache_ttl' => $credits_cache_ttl,
+                'logs_keep_latest'  => $logs_keep_latest,
+                'logs_keep_days'    => $logs_keep_days,
+                'default_language' => $default_language,
+                'default_tone' => $default_tone,
+                'default_uniqueness' => $default_uniqueness,
+                'safety_no_medical_financial' => $safety_no_medical_financial,
+                'safety_no_competitors' => $safety_no_competitors,
+                'safety_no_caps' => $safety_no_caps,
             );
         }
 

@@ -337,6 +337,51 @@
                     <p class="ucg-muted ucg-field-hint">Для WooCommerce отзывов: модель будет генерировать рейтинг в выбранном диапазоне.</p>
                 </div>
 
+                <div class="ucg-date-range-block" id="ucg-style-controls-wrap">
+                    <strong>Стиль генерации</strong>
+                    <div class="ucg-grid-3" style="margin-top:8px;">
+                        <label class="ucg-field">
+                            <span>Язык</span>
+                            <select id="ucg-wizard-language" class="ucg-enhanced-select" data-search-enabled="false">
+                                <option value="auto">Авто</option>
+                                <option value="ru">Русский</option>
+                                <option value="en">English</option>
+                            </select>
+                        </label>
+                        <label class="ucg-field">
+                            <span>Тон</span>
+                            <select id="ucg-wizard-tone" class="ucg-enhanced-select" data-search-enabled="false">
+                                <option value="neutral">Нейтральный</option>
+                                <option value="official">Официальный</option>
+                                <option value="friendly">Дружелюбный</option>
+                            </select>
+                        </label>
+                        <label class="ucg-field">
+                            <span>Уникальность</span>
+                            <select id="ucg-wizard-uniqueness" class="ucg-enhanced-select" data-search-enabled="false">
+                                <option value="low">Низкая</option>
+                                <option value="medium">Средняя</option>
+                                <option value="high">Высокая</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="ucg-grid-3" style="margin-top:8px;">
+                        <label class="ucg-checkbox">
+                            <input type="checkbox" id="ucg-wizard-safety-no-medical-financial">
+                            <span>Запрет мед/фин обещаний</span>
+                        </label>
+                        <label class="ucg-checkbox">
+                            <input type="checkbox" id="ucg-wizard-safety-no-competitors">
+                            <span>Не упоминать конкурентов</span>
+                        </label>
+                        <label class="ucg-checkbox">
+                            <input type="checkbox" id="ucg-wizard-safety-no-caps">
+                            <span>Не использовать CAPS</span>
+                        </label>
+                    </div>
+                    <p class="ucg-muted ucg-field-hint">По умолчанию берём значения из настроек. Можно изменить для конкретного запуска.</p>
+                </div>
+
                 <div id="ucg-template-body-standard-wrap">
                     <label class="ucg-field">
                         <span>Текст шаблона</span>

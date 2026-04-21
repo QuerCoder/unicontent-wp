@@ -151,6 +151,19 @@ if (!class_exists('UCG_Generator')) {
                     $processed_now++;
                     if (is_wp_error($result) && $this->is_fatal_api_error($result)) {
                         $fatal_error = $result->get_error_message();
+                        if (class_exists('UCG_Logger')) {
+                            UCG_Logger::error(
+                                'generator',
+                                'fatal_error',
+                                'Fatal API error. Marking pending items failed.',
+                                array(
+                                    'issue' => $fatal_error,
+                                ),
+                                $run_id,
+                                isset($item['id']) ? (int) $item['id'] : null,
+                                isset($item['post_id']) ? (int) $item['post_id'] : null
+                            );
+                        }
                         UCG_DB::mark_pending_items_failed($run_id, $fatal_error);
                         UCG_DB::update_run(
                             $run_id,
@@ -166,6 +179,21 @@ if (!class_exists('UCG_Generator')) {
                         $issue = $this->classify_issue($result);
                         $first_issue_type = isset($issue['type']) ? sanitize_key((string) $issue['type']) : '';
                         $first_issue_message = isset($issue['message']) ? (string) $issue['message'] : $result->get_error_message();
+                        if (class_exists('UCG_Logger')) {
+                            UCG_Logger::warn(
+                                'generator',
+                                'item_issue',
+                                'Generation item issue.',
+                                array(
+                                    'error_code' => (string) $result->get_error_code(),
+                                    'issue_type' => (string) $first_issue_type,
+                                    'issue_message' => (string) $first_issue_message,
+                                ),
+                                $run_id,
+                                isset($item['id']) ? (int) $item['id'] : null,
+                                isset($item['post_id']) ? (int) $item['post_id'] : null
+                            );
+                        }
                     }
                 }
 
@@ -235,6 +263,13 @@ if (!class_exists('UCG_Generator')) {
             $publish_date_to = '';
             $rating_min = 1;
             $rating_max = 5;
+            $style_language = 'auto';
+            $style_tone = 'neutral';
+            $style_uniqueness = 'medium';
+            $safety_no_medical_financial = 1;
+            $safety_no_competitors = 1;
+            $safety_no_caps = 1;
+            $run_seed = '';
 
             if ($item_id <= 0 || $post_id <= 0 || $run_id <= 0) {
                 return new WP_Error('ucg_invalid_queue_item', __('Некорректный элемент очереди.', 'unicontent-ai-generator'));
@@ -262,6 +297,13 @@ if (!class_exists('UCG_Generator')) {
                     $publish_date_to = isset($options['publish_date_to']) ? (string) $options['publish_date_to'] : '';
                     $rating_min = isset($options['rating_min']) ? (int) $options['rating_min'] : 1;
                     $rating_max = isset($options['rating_max']) ? (int) $options['rating_max'] : 5;
+                    $style_language = isset($options['style_language']) ? sanitize_key((string) $options['style_language']) : 'auto';
+                    $style_tone = isset($options['style_tone']) ? sanitize_key((string) $options['style_tone']) : 'neutral';
+                    $style_uniqueness = isset($options['style_uniqueness']) ? sanitize_key((string) $options['style_uniqueness']) : 'medium';
+                    $safety_no_medical_financial = !empty($options['safety_no_medical_financial']) ? 1 : 0;
+                    $safety_no_competitors = !empty($options['safety_no_competitors']) ? 1 : 0;
+                    $safety_no_caps = !empty($options['safety_no_caps']) ? 1 : 0;
+                    $run_seed = isset($options['run_seed']) ? (string) $options['run_seed'] : '';
                 }
             }
 
@@ -295,6 +337,21 @@ if (!class_exists('UCG_Generator')) {
                 $write_context['rating_min'] = $rating_min;
                 $write_context['rating_max'] = $rating_max;
             }
+
+            $system_prompt = $this->build_effective_system_prompt(
+                $system_prompt,
+                $scenario,
+                $style_language,
+                $style_tone,
+                $style_uniqueness,
+                $safety_no_medical_financial,
+                $safety_no_competitors,
+                $safety_no_caps,
+                $run_seed,
+                $run_id,
+                $post_id,
+                isset($item['item_index']) ? (int) $item['item_index'] : 1
+            );
 
             if ($scenario === 'seo_tags') {
                 if ($seo_title_prompt_template === '' && $seo_description_prompt_template === '' && $template_body !== '') {
@@ -633,6 +690,97 @@ if (!class_exists('UCG_Generator')) {
             $instruction_en = 'Return only the final SEO description (no quotes, no markdown, no comments). Length: 140-160 characters.';
 
             return $prompt . "\n\n" . $instruction_ru . "\n" . $instruction_en;
+        }
+
+        protected function build_effective_system_prompt(
+            $base_system_prompt,
+            $scenario,
+            $style_language,
+            $style_tone,
+            $style_uniqueness,
+            $safety_no_medical_financial,
+            $safety_no_competitors,
+            $safety_no_caps,
+            $run_seed,
+            $run_id,
+            $post_id,
+            $item_index
+        ) {
+            $base_system_prompt = trim((string) $base_system_prompt);
+            $scenario = sanitize_key((string) $scenario);
+
+            $style_language = sanitize_key((string) $style_language);
+            if (!in_array($style_language, array('auto', 'ru', 'en'), true)) {
+                $style_language = 'auto';
+            }
+
+            $style_tone = sanitize_key((string) $style_tone);
+            if (!in_array($style_tone, array('neutral', 'official', 'friendly'), true)) {
+                $style_tone = 'neutral';
+            }
+
+            $style_uniqueness = sanitize_key((string) $style_uniqueness);
+            if (!in_array($style_uniqueness, array('low', 'medium', 'high'), true)) {
+                $style_uniqueness = 'medium';
+            }
+
+            $blocks = array();
+
+            if ($base_system_prompt !== '') {
+                $blocks[] = $base_system_prompt;
+            }
+
+            // Style rules (RU+EN to avoid getting stuck in one language).
+            $lang_rule = $style_language === 'ru'
+                ? 'Пиши по-русски.'
+                : ($style_language === 'en' ? 'Write in English.' : '');
+            if ($lang_rule !== '') {
+                $blocks[] = $lang_rule;
+            }
+
+            if ($style_tone === 'official') {
+                $blocks[] = 'Тон: официальный, деловой, без фамильярности.\nTone: official, professional, not casual.';
+            } elseif ($style_tone === 'friendly') {
+                $blocks[] = 'Тон: дружелюбный, естественный, без жаргона.\nTone: friendly, natural, not slangy.';
+            } else {
+                $blocks[] = 'Тон: нейтральный.\nTone: neutral.';
+            }
+
+            if ($style_uniqueness === 'high') {
+                $blocks[] = 'Уникальность: высокая. Избегай повторов шаблонов и клише; используй разные вступления и структуру.\nUniqueness: high. Avoid templates/cliches; vary openings and structure.';
+            } elseif ($style_uniqueness === 'low') {
+                $blocks[] = 'Уникальность: низкая. Допускается более прямой стиль.\nUniqueness: low. More direct wording is ok.';
+            } else {
+                $blocks[] = 'Уникальность: средняя. Старайся разнообразить формулировки.\nUniqueness: medium. Try to vary wording.';
+            }
+
+            // Safety.
+            $safety_lines = array();
+            if (!empty($safety_no_medical_financial)) {
+                $safety_lines[] = 'Запрещены медицинские и финансовые обещания/гарантии.\nNo medical or financial promises/guarantees.';
+            }
+            if (!empty($safety_no_competitors)) {
+                $safety_lines[] = 'Не упоминай конкурентов, бренды конкурентов и сравнения.\nDo not mention competitors or comparisons.';
+            }
+            if (!empty($safety_no_caps)) {
+                $safety_lines[] = 'Не используй CAPS (все буквы заглавные).\nDo not use ALL CAPS.';
+            }
+            if (!empty($safety_lines)) {
+                $blocks[] = implode("\n", $safety_lines);
+            }
+
+            // Anti-repeat: deterministic variation key for comments/reviews.
+            if (($scenario === 'comments' || $scenario === 'woo_reviews') && $run_id > 0 && $post_id > 0) {
+                $run_seed = trim((string) $run_seed);
+                if ($run_seed === '') {
+                    $run_seed = wp_generate_uuid4();
+                }
+                $item_index = max(1, (int) $item_index);
+                $key = substr(hash('sha256', $run_seed . '|' . $run_id . '|' . $post_id . '|' . $item_index), 0, 12);
+                $blocks[] = 'Variation key: ' . $key . ".\nUse it as a seed to diversify wording and structure. Do not repeat previous phrasings.";
+            }
+
+            return trim(implode("\n\n", array_filter($blocks)));
         }
 
         protected function soft_trim_to_chars($text, $max_chars) {

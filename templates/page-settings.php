@@ -74,6 +74,56 @@
                 <button type="button" class="button ucg-btn ucg-btn--primary" id="ucg-save-batch-size">Сохранить</button>
             </div>
         </section>
+
+        <section class="ucg-card">
+            <h3>Стиль генерации (по умолчанию)</h3>
+            <p class="ucg-muted">Эти настройки применяются ко всем новым запускам. В мастере запуска их можно будет переопределить.</p>
+
+            <label class="ucg-field">
+                <span>Язык</span>
+                <select id="ucg-default-language" class="ucg-enhanced-select" data-search-enabled="false">
+                    <option value="auto" <?php selected((string) $settings['default_language'], 'auto'); ?>>Авто</option>
+                    <option value="ru" <?php selected((string) $settings['default_language'], 'ru'); ?>>Русский</option>
+                    <option value="en" <?php selected((string) $settings['default_language'], 'en'); ?>>English</option>
+                </select>
+            </label>
+
+            <label class="ucg-field">
+                <span>Тон</span>
+                <select id="ucg-default-tone" class="ucg-enhanced-select" data-search-enabled="false">
+                    <option value="neutral" <?php selected((string) $settings['default_tone'], 'neutral'); ?>>Нейтральный</option>
+                    <option value="official" <?php selected((string) $settings['default_tone'], 'official'); ?>>Официальный</option>
+                    <option value="friendly" <?php selected((string) $settings['default_tone'], 'friendly'); ?>>Дружелюбный</option>
+                </select>
+            </label>
+
+            <label class="ucg-field">
+                <span>Уникальность</span>
+                <select id="ucg-default-uniqueness" class="ucg-enhanced-select" data-search-enabled="false">
+                    <option value="low" <?php selected((string) $settings['default_uniqueness'], 'low'); ?>>Низкая</option>
+                    <option value="medium" <?php selected((string) $settings['default_uniqueness'], 'medium'); ?>>Средняя</option>
+                    <option value="high" <?php selected((string) $settings['default_uniqueness'], 'high'); ?>>Высокая</option>
+                </select>
+            </label>
+
+            <h4 style="margin: 14px 0 6px;">Ограничения</h4>
+            <label class="ucg-checkbox">
+                <input type="checkbox" id="ucg-safety-no-medical-financial" <?php checked(!empty($settings['safety_no_medical_financial'])); ?>>
+                <span>Запрет мед/фин обещаний</span>
+            </label>
+            <label class="ucg-checkbox">
+                <input type="checkbox" id="ucg-safety-no-competitors" <?php checked(!empty($settings['safety_no_competitors'])); ?>>
+                <span>Не упоминать конкурентов</span>
+            </label>
+            <label class="ucg-checkbox">
+                <input type="checkbox" id="ucg-safety-no-caps" <?php checked(!empty($settings['safety_no_caps'])); ?>>
+                <span>Не использовать CAPS</span>
+            </label>
+
+            <div class="ucg-actions-row ucg-actions-row--footer">
+                <button type="button" class="button ucg-btn ucg-btn--primary" id="ucg-save-style-defaults">Сохранить</button>
+            </div>
+        </section>
     </div>
 
     <div id="ucg-api-status" class="ucg-api-status" aria-live="polite"></div>

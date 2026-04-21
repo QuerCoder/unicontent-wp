@@ -14,6 +14,7 @@ if (!class_exists('UCG_Activator')) {
             $templates_table = UCG_DB::table_templates();
             $runs_table = UCG_DB::table_runs();
             $items_table = UCG_DB::table_run_items();
+            $logs_table = UCG_DB::table_logs();
 
             $sql_templates = "CREATE TABLE {$templates_table} (
                 id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -80,11 +81,32 @@ if (!class_exists('UCG_Activator')) {
                 KEY post_id (post_id)
             ) {$charset_collate};";
 
+            $sql_logs = "CREATE TABLE {$logs_table} (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                created_at DATETIME NOT NULL,
+                level VARCHAR(10) NOT NULL DEFAULT 'info',
+                area VARCHAR(32) NOT NULL DEFAULT 'general',
+                event VARCHAR(64) NOT NULL DEFAULT 'event',
+                message TEXT NOT NULL,
+                context_json LONGTEXT NULL,
+                run_id BIGINT UNSIGNED NULL,
+                item_id BIGINT UNSIGNED NULL,
+                post_id BIGINT UNSIGNED NULL,
+                PRIMARY KEY (id),
+                KEY created_at (created_at),
+                KEY level (level),
+                KEY area (area),
+                KEY run_id (run_id),
+                KEY post_id (post_id)
+            ) {$charset_collate};";
+
             dbDelta($sql_templates);
             dbDelta($sql_runs);
             dbDelta($sql_items);
+            dbDelta($sql_logs);
 
             self::ensure_multi_items_per_post_schema();
+            self::ensure_logs_schema();
 
             if (false === get_option(UCG_Settings::OPTION_KEY, false)) {
                 add_option(UCG_Settings::OPTION_KEY, UCG_Settings::defaults());
@@ -126,6 +148,36 @@ if (!class_exists('UCG_Activator')) {
                     $wpdb->query("ALTER TABLE {$items_table} DROP INDEX run_post");
                 }
                 $wpdb->query("ALTER TABLE {$items_table} ADD UNIQUE KEY run_post (run_id, post_id, item_index)");
+            }
+        }
+
+        protected static function ensure_logs_schema() {
+            global $wpdb;
+            $logs_table = UCG_DB::table_logs();
+
+            // Ensure core columns exist even if dbDelta missed them.
+            $columns = array(
+                'level' => "ALTER TABLE {$logs_table} ADD COLUMN level VARCHAR(10) NOT NULL DEFAULT 'info' AFTER created_at",
+                'area' => "ALTER TABLE {$logs_table} ADD COLUMN area VARCHAR(32) NOT NULL DEFAULT 'general' AFTER level",
+                'event' => "ALTER TABLE {$logs_table} ADD COLUMN event VARCHAR(64) NOT NULL DEFAULT 'event' AFTER area",
+                'message' => "ALTER TABLE {$logs_table} ADD COLUMN message TEXT NOT NULL AFTER event",
+                'context_json' => "ALTER TABLE {$logs_table} ADD COLUMN context_json LONGTEXT NULL AFTER message",
+                'run_id' => "ALTER TABLE {$logs_table} ADD COLUMN run_id BIGINT UNSIGNED NULL AFTER context_json",
+                'item_id' => "ALTER TABLE {$logs_table} ADD COLUMN item_id BIGINT UNSIGNED NULL AFTER run_id",
+                'post_id' => "ALTER TABLE {$logs_table} ADD COLUMN post_id BIGINT UNSIGNED NULL AFTER item_id",
+            );
+
+            foreach ($columns as $column => $sql) {
+                $has = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM {$logs_table} LIKE %s", $column));
+                if (!$has) {
+                    $wpdb->query($sql);
+                }
+            }
+
+            // Ensure created_at exists (some MySQL variants may drop it in migrations).
+            $has_created_at = $wpdb->get_var("SHOW COLUMNS FROM {$logs_table} LIKE 'created_at'");
+            if (!$has_created_at) {
+                $wpdb->query("ALTER TABLE {$logs_table} ADD COLUMN created_at DATETIME NOT NULL");
             }
         }
 

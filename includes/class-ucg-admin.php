@@ -23,6 +23,7 @@ if (!class_exists('UCG_Admin')) {
             add_action('wp_ajax_ucg_save_api_key', array($this, 'ajax_save_api_key'));
             add_action('wp_ajax_ucg_delete_api_key', array($this, 'ajax_delete_api_key'));
             add_action('wp_ajax_ucg_save_batch_size', array($this, 'ajax_save_batch_size'));
+            add_action('wp_ajax_ucg_save_style_defaults', array($this, 'ajax_save_style_defaults'));
             add_action('wp_ajax_ucg_wizard_schema', array($this, 'ajax_wizard_schema'));
             add_action('wp_ajax_ucg_wizard_preview', array($this, 'ajax_wizard_preview'));
             add_action('wp_ajax_ucg_wizard_load_template', array($this, 'ajax_wizard_load_template'));
@@ -59,6 +60,7 @@ if (!class_exists('UCG_Admin')) {
             add_submenu_page('ucg-dashboard', __('Генерация', 'unicontent-ai-generator'), __('Генерация', 'unicontent-ai-generator'), 'manage_options', 'ucg-generate', array($this, 'render_generate'));
             add_submenu_page('ucg-dashboard', __('Проверка', 'unicontent-ai-generator'), __('Проверка', 'unicontent-ai-generator') . $review_badge, 'manage_options', 'ucg-review', array($this, 'render_review'));
             add_submenu_page('ucg-dashboard', __('История', 'unicontent-ai-generator'), __('История', 'unicontent-ai-generator'), 'manage_options', 'ucg-runs', array($this, 'render_runs'));
+            add_submenu_page('ucg-dashboard', __('Логи', 'unicontent-ai-generator'), __('Логи', 'unicontent-ai-generator'), 'manage_options', 'ucg-logs', array($this, 'render_logs'));
             add_submenu_page('ucg-dashboard', __('Настройки', 'unicontent-ai-generator'), __('Настройки', 'unicontent-ai-generator'), 'manage_options', 'ucg-settings', array($this, 'render_settings'));
             add_submenu_page(null, __('Готовые шаблоны', 'unicontent-ai-generator'), __('Готовые шаблоны', 'unicontent-ai-generator'), 'manage_options', 'ucg-ready-templates', array($this, 'render_ready_templates'));
             add_submenu_page(null, __('Прогресс запуска', 'unicontent-ai-generator'), __('Прогресс запуска', 'unicontent-ai-generator'), 'manage_options', 'ucg-run-progress', array($this, 'render_run_progress'));
@@ -283,6 +285,40 @@ if (!class_exists('UCG_Admin')) {
 
             ob_start();
             include UCG_PLUGIN_DIR . 'templates/page-run-progress.php';
+            $html = (string) ob_get_clean();
+            echo class_exists('UCG_I18n') ? UCG_I18n::translate_markup($html) : $html;
+        }
+
+        public function render_logs() {
+            $filters = array(
+                'level' => sanitize_key($this->get_request_string($_GET, 'level', '')),
+                'area' => sanitize_key($this->get_request_string($_GET, 'area', '')),
+                'run_id' => $this->get_request_int($_GET, 'run_id', 0),
+                'since' => sanitize_text_field($this->get_request_string($_GET, 'since', '')),
+                'until' => sanitize_text_field($this->get_request_string($_GET, 'until', '')),
+            );
+            $logs = UCG_DB::get_logs($filters, 400);
+
+            $log_areas = array(
+                '' => __('Все', 'unicontent-ai-generator'),
+                'general' => __('Общие', 'unicontent-ai-generator'),
+                'wizard' => __('Мастер', 'unicontent-ai-generator'),
+                'api' => __('API', 'unicontent-ai-generator'),
+                'generator' => __('Генератор', 'unicontent-ai-generator'),
+                'updater' => __('Обновления', 'unicontent-ai-generator'),
+                'settings' => __('Настройки', 'unicontent-ai-generator'),
+            );
+            $log_levels = array(
+                '' => __('Все', 'unicontent-ai-generator'),
+                'info' => __('Info', 'unicontent-ai-generator'),
+                'warn' => __('Warn', 'unicontent-ai-generator'),
+                'error' => __('Error', 'unicontent-ai-generator'),
+            );
+
+            $diagnostics = $this->build_logs_diagnostics_snapshot();
+
+            ob_start();
+            include UCG_PLUGIN_DIR . 'templates/page-logs.php';
             $html = (string) ob_get_clean();
             echo class_exists('UCG_I18n') ? UCG_I18n::translate_markup($html) : $html;
         }
@@ -926,6 +962,40 @@ if (!class_exists('UCG_Admin')) {
             );
         }
 
+        public function ajax_save_style_defaults() {
+            $this->guard_ajax();
+
+            $default_language = sanitize_key($this->get_request_string($_POST, 'default_language', 'auto'));
+            if (!in_array($default_language, array('auto', 'ru', 'en'), true)) {
+                $default_language = 'auto';
+            }
+            $default_tone = sanitize_key($this->get_request_string($_POST, 'default_tone', 'neutral'));
+            if (!in_array($default_tone, array('neutral', 'official', 'friendly'), true)) {
+                $default_tone = 'neutral';
+            }
+            $default_uniqueness = sanitize_key($this->get_request_string($_POST, 'default_uniqueness', 'medium'));
+            if (!in_array($default_uniqueness, array('low', 'medium', 'high'), true)) {
+                $default_uniqueness = 'medium';
+            }
+
+            $values = array(
+                'default_language' => $default_language,
+                'default_tone' => $default_tone,
+                'default_uniqueness' => $default_uniqueness,
+                'safety_no_medical_financial' => !empty($_POST['safety_no_medical_financial']) ? 1 : 0,
+                'safety_no_competitors' => !empty($_POST['safety_no_competitors']) ? 1 : 0,
+                'safety_no_caps' => !empty($_POST['safety_no_caps']) ? 1 : 0,
+            );
+
+            UCG_Settings::update($values);
+
+            wp_send_json_success(
+                array(
+                    'message' => __('Сохранено.', 'unicontent-ai-generator'),
+                )
+            );
+        }
+
         public function ajax_run_status() {
             $this->guard_ajax();
 
@@ -1009,6 +1079,9 @@ if (!class_exists('UCG_Admin')) {
             $this->guard_ajax();
 
             if (!UCG_Settings::has_valid_api_key()) {
+                if (class_exists('UCG_Logger')) {
+                    UCG_Logger::warn('wizard', 'api_key_missing', 'Wizard create run: API key missing.', array());
+                }
                 wp_send_json_error(array('message' => __('Сначала добавьте и проверьте API ключ.', 'unicontent-ai-generator')));
             }
 
@@ -1143,21 +1216,39 @@ if (!class_exists('UCG_Admin')) {
             if ($model === '') {
                 $model = 'auto';
             }
+            $style_language = sanitize_key($this->get_request_string($_POST, 'style_language', (string) UCG_Settings::get_option('default_language', 'auto')));
+            $style_tone = sanitize_key($this->get_request_string($_POST, 'style_tone', (string) UCG_Settings::get_option('default_tone', 'neutral')));
+            $style_uniqueness = sanitize_key($this->get_request_string($_POST, 'style_uniqueness', (string) UCG_Settings::get_option('default_uniqueness', 'medium')));
+            $safety_no_medical_financial = $this->get_request_int($_POST, 'safety_no_medical_financial', (int) UCG_Settings::get_option('safety_no_medical_financial', 1));
+            $safety_no_competitors = $this->get_request_int($_POST, 'safety_no_competitors', (int) UCG_Settings::get_option('safety_no_competitors', 1));
+            $safety_no_caps = $this->get_request_int($_POST, 'safety_no_caps', (int) UCG_Settings::get_option('safety_no_caps', 1));
             $save_template = !empty($_POST['save_template']) ? 1 : 0;
             $vary_length = !empty($_POST['vary_length']) ? 1 : 0;
             $publish_date_from = '';
             $publish_date_to = '';
 
             if ($post_type === '' || !post_type_exists($post_type)) {
+                if (class_exists('UCG_Logger')) {
+                    UCG_Logger::warn('wizard', 'invalid_post_type', 'Wizard create run: invalid post_type.', array('post_type' => (string) $post_type));
+                }
                 wp_send_json_error(array('message' => __('Некорректный post type.', 'unicontent-ai-generator')));
             }
             if (!$this->is_scenario_available($scenario)) {
+                if (class_exists('UCG_Logger')) {
+                    UCG_Logger::warn('wizard', 'scenario_unavailable', 'Wizard create run: scenario unavailable.', array('scenario' => (string) $scenario));
+                }
                 wp_send_json_error(array('message' => __('Выбранный сценарий пока недоступен.', 'unicontent-ai-generator')));
             }
             if ($scenario === 'woo_reviews' && $post_type !== 'product') {
+                if (class_exists('UCG_Logger')) {
+                    UCG_Logger::warn('wizard', 'woo_not_product', 'Wizard create run: woo_reviews requires product post_type.', array('post_type' => (string) $post_type));
+                }
                 wp_send_json_error(array('message' => __('Для сценария отзывов WooCommerce выберите тип записей: Товар (product).', 'unicontent-ai-generator')));
             }
             if ($scenario === 'comments' && !post_type_supports($post_type, 'comments')) {
+                if (class_exists('UCG_Logger')) {
+                    UCG_Logger::warn('wizard', 'comments_not_supported', 'Wizard create run: post_type does not support comments.', array('post_type' => (string) $post_type));
+                }
                 wp_send_json_error(array('message' => __('Выбранный тип записей не поддерживает комментарии.', 'unicontent-ai-generator')));
             }
 
@@ -1348,7 +1439,17 @@ if (!class_exists('UCG_Admin')) {
                 'items_per_post' => $items_per_post,
                 'rating_min' => $rating_min,
                 'rating_max' => $rating_max,
+                'style_language' => in_array($style_language, array('auto', 'ru', 'en'), true) ? $style_language : 'auto',
+                'style_tone' => in_array($style_tone, array('neutral', 'official', 'friendly'), true) ? $style_tone : 'neutral',
+                'style_uniqueness' => in_array($style_uniqueness, array('low', 'medium', 'high'), true) ? $style_uniqueness : 'medium',
+                'safety_no_medical_financial' => !empty($safety_no_medical_financial) ? 1 : 0,
+                'safety_no_competitors' => !empty($safety_no_competitors) ? 1 : 0,
+                'safety_no_caps' => !empty($safety_no_caps) ? 1 : 0,
             );
+
+            if (empty($options['run_seed'])) {
+                $options['run_seed'] = function_exists('wp_generate_uuid4') ? wp_generate_uuid4() : (string) wp_rand(100000, 999999) . '-' . time();
+            }
 
             $run_id = UCG_DB::create_run($post_type, $target_field, $active_template_id, get_current_user_id(), $options);
             if ($run_id <= 0) {
@@ -1437,6 +1538,8 @@ if (!class_exists('UCG_Admin')) {
             $text_length_options = isset($text_length_data['options']) && is_array($text_length_data['options']) ? $text_length_data['options'] : array();
             $generation_models_data = $this->get_generation_models($scenario, !empty($force_refresh_lengths));
 
+            $settings = UCG_Settings::get();
+
             return array(
                 'scenario' => $scenario,
                 'scenario_options' => $scenario_options,
@@ -1464,6 +1567,14 @@ if (!class_exists('UCG_Admin')) {
                     : array(),
                 'default_model' => isset($generation_models_data['default_model']) ? (string) $generation_models_data['default_model'] : 'auto',
                 'generation_unit_label' => isset($generation_models_data['unit_label']) ? (string) $generation_models_data['unit_label'] : __('1 единица', 'unicontent-ai-generator'),
+                'settings' => array(
+                    'default_language' => isset($settings['default_language']) ? sanitize_key((string) $settings['default_language']) : 'auto',
+                    'default_tone' => isset($settings['default_tone']) ? sanitize_key((string) $settings['default_tone']) : 'neutral',
+                    'default_uniqueness' => isset($settings['default_uniqueness']) ? sanitize_key((string) $settings['default_uniqueness']) : 'medium',
+                    'safety_no_medical_financial' => !empty($settings['safety_no_medical_financial']) ? 1 : 0,
+                    'safety_no_competitors' => !empty($settings['safety_no_competitors']) ? 1 : 0,
+                    'safety_no_caps' => !empty($settings['safety_no_caps']) ? 1 : 0,
+                ),
                 'filter_fields' => $filter_fields,
                 'filter_operators' => array(
                     array('value' => 'is_empty', 'label' => __('пусто', 'unicontent-ai-generator')),
@@ -3237,13 +3348,60 @@ if (!class_exists('UCG_Admin')) {
                 if (mb_strlen($message, 'UTF-8') <= $max_length) {
                     return $message;
                 }
-                return rtrim(mb_substr($message, 0, $max_length - 1, 'UTF-8')) . '…';
+                return mb_substr($message, 0, $max_length, 'UTF-8') . '…';
             }
 
             if (strlen($message) <= $max_length) {
                 return $message;
             }
-            return rtrim(substr($message, 0, $max_length - 1)) . '…';
+
+            return substr($message, 0, $max_length) . '…';
+        }
+
+        protected function build_logs_diagnostics_snapshot() {
+            $settings = UCG_Settings::get();
+            $masked_key = UCG_Settings::get_masked_api_key();
+
+            $plugins = array();
+            if (function_exists('get_plugins')) {
+                $all = get_plugins();
+                if (is_array($all)) {
+                    foreach ($all as $file => $data) {
+                        if (empty($data['Name'])) {
+                            continue;
+                        }
+                        $plugins[] = array(
+                            'file' => (string) $file,
+                            'name' => isset($data['Name']) ? (string) $data['Name'] : '',
+                            'version' => isset($data['Version']) ? (string) $data['Version'] : '',
+                            'active' => is_plugin_active($file) ? 1 : 0,
+                        );
+                    }
+                }
+            }
+
+            return array(
+                'plugin_version' => defined('UCG_VERSION') ? (string) UCG_VERSION : '',
+                'wp_version' => function_exists('get_bloginfo') ? (string) get_bloginfo('version') : '',
+                'php_version' => function_exists('phpversion') ? (string) phpversion() : '',
+                'site_url' => function_exists('site_url') ? (string) site_url() : '',
+                'home_url' => function_exists('home_url') ? (string) home_url() : '',
+                'timezone' => function_exists('wp_timezone_string') ? (string) wp_timezone_string() : '',
+                'object_cache' => function_exists('wp_using_ext_object_cache') ? (wp_using_ext_object_cache() ? 1 : 0) : 0,
+                'ucg_settings' => array(
+                    'api_base_url' => isset($settings['api_base_url']) ? (string) $settings['api_base_url'] : '',
+                    'api_key_masked' => $masked_key,
+                    'api_key_verified' => !empty($settings['api_key_verified']) ? 1 : 0,
+                    'request_timeout' => isset($settings['request_timeout']) ? (int) $settings['request_timeout'] : 0,
+                    'batch_size' => isset($settings['batch_size']) ? (int) $settings['batch_size'] : 0,
+                    'generation_mode' => isset($settings['generation_mode']) ? (string) $settings['generation_mode'] : '',
+                    'max_tokens' => isset($settings['max_tokens']) ? (int) $settings['max_tokens'] : 0,
+                    'credits_cache_ttl' => isset($settings['credits_cache_ttl']) ? (int) $settings['credits_cache_ttl'] : 0,
+                    'logs_keep_latest' => isset($settings['logs_keep_latest']) ? (int) $settings['logs_keep_latest'] : 0,
+                    'logs_keep_days' => isset($settings['logs_keep_days']) ? (int) $settings['logs_keep_days'] : 0,
+                ),
+                'plugins' => $plugins,
+            );
         }
 
         protected function resolve_ready_templates_redirect_page($source) {

@@ -904,11 +904,21 @@ jQuery(function ($) {
         const $batchInput = $('#ucg-batch-size-input');
         const $saveBatchButton = $('#ucg-save-batch-size');
         const $generationMode = $('#ucg-generation-mode');
+        const $saveStyleDefaults = $('#ucg-save-style-defaults');
+        const $defaultLanguage = $('#ucg-default-language');
+        const $defaultTone = $('#ucg-default-tone');
+        const $defaultUniqueness = $('#ucg-default-uniqueness');
+        const $safetyNoMedFin = $('#ucg-safety-no-medical-financial');
+        const $safetyNoCompetitors = $('#ucg-safety-no-competitors');
+        const $safetyNoCaps = $('#ucg-safety-no-caps');
         if (!$batchInput.length || !$saveBatchButton.length) {
             return;
         }
 
         initEnhancedSelects($generationMode);
+        initEnhancedSelects($defaultLanguage);
+        initEnhancedSelects($defaultTone);
+        initEnhancedSelects($defaultUniqueness);
 
         $saveBatchButton.on('click', function () {
             const raw = Number($batchInput.val() || 20);
@@ -945,6 +955,38 @@ jQuery(function ($) {
                 setButtonLoading($saveBatchButton, false);
             });
         });
+
+        if ($saveStyleDefaults.length) {
+            $saveStyleDefaults.on('click', function () {
+                const loadingText = (window.ucgAdmin && window.ucgAdmin.strings && ucgAdmin.strings.saving_batch)
+                    ? ucgAdmin.strings.saving_batch
+                    : jsT('Сохраняем настройки...');
+                setApiStatus(loadingText, false);
+                setButtonLoading($saveStyleDefaults, true);
+
+                $.post(ucgAdmin.ajaxUrl, {
+                    action: 'ucg_save_style_defaults',
+                    nonce: ucgAdmin.nonce,
+                    default_language: String($defaultLanguage.val() || 'auto'),
+                    default_tone: String($defaultTone.val() || 'neutral'),
+                    default_uniqueness: String($defaultUniqueness.val() || 'medium'),
+                    safety_no_medical_financial: ($safetyNoMedFin.is(':checked') ? 1 : 0),
+                    safety_no_competitors: ($safetyNoCompetitors.is(':checked') ? 1 : 0),
+                    safety_no_caps: ($safetyNoCaps.is(':checked') ? 1 : 0)
+                }).done(function (response) {
+                    if (!response.success) {
+                        const msg = response.data && response.data.message ? response.data.message : jsT('Не удалось сохранить настройки.');
+                        setApiStatus(msg, true);
+                        return;
+                    }
+                    setApiStatus(response.data && response.data.message ? response.data.message : jsT('Сохранено.'), false);
+                }).fail(function () {
+                    setApiStatus(jsT('AJAX ошибка при сохранении настроек.'), true);
+                }).always(function () {
+                    setButtonLoading($saveStyleDefaults, false);
+                });
+            });
+        }
     }
 
     function initReviewModal() {
@@ -1012,6 +1054,65 @@ jQuery(function ($) {
         });
     }
 
+    function initLogsPage() {
+        const $logs = $('#ucg-logs-json');
+        if (!$logs.length) {
+            return;
+        }
+
+        function download(filename, text) {
+            const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        function copyText(text) {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                return navigator.clipboard.writeText(text);
+            }
+            const tmp = document.createElement('textarea');
+            tmp.value = text;
+            tmp.setAttribute('readonly', 'readonly');
+            tmp.style.position = 'absolute';
+            tmp.style.left = '-9999px';
+            document.body.appendChild(tmp);
+            tmp.select();
+            document.execCommand('copy');
+            tmp.remove();
+            return Promise.resolve();
+        }
+
+        $('#ucg-copy-logs').on('click', function () {
+            const text = String($logs.val() || '');
+            copyText(text);
+        });
+
+        $('#ucg-download-logs').on('click', function () {
+            const text = String($logs.val() || '');
+            const dt = new Date();
+            const y = dt.getFullYear();
+            const m = String(dt.getMonth() + 1).padStart(2, '0');
+            const d = String(dt.getDate()).padStart(2, '0');
+            download('unicontent-logs-' + y + m + d + '.json', text);
+        });
+
+        $('#ucg-copy-diagnostics').on('click', function () {
+            try {
+                const parsed = JSON.parse(String($logs.val() || '{}'));
+                const diag = parsed && parsed.diagnostics ? JSON.stringify(parsed.diagnostics, null, 2) : '';
+                copyText(diag || '');
+            } catch (e) {
+                copyText('');
+            }
+        });
+    }
+
     function initGenerateWizard() {
         const $wizard = $('#ucg-wizard');
         if (!$wizard.length) {
@@ -1069,6 +1170,12 @@ jQuery(function ($) {
         const $wooRatingRangeWrap = $('#ucg-woo-rating-range-wrap');
         const $wooRatingMin = $('#ucg-woo-rating-min');
         const $wooRatingMax = $('#ucg-woo-rating-max');
+        const $styleLanguage = $('#ucg-wizard-language');
+        const $styleTone = $('#ucg-wizard-tone');
+        const $styleUniqueness = $('#ucg-wizard-uniqueness');
+        const $safetyNoMedFin = $('#ucg-wizard-safety-no-medical-financial');
+        const $safetyNoCompetitors = $('#ucg-wizard-safety-no-competitors');
+        const $safetyNoCaps = $('#ucg-wizard-safety-no-caps');
         const $wizardTokenSearch = $('#ucg-wizard-token-search');
         const $tokens = $('#ucg-wizard-tokens');
         const $filterRows = $('#ucg-filter-rows');
@@ -2297,6 +2404,28 @@ jQuery(function ($) {
                 renderGenerationModels();
                 renderTemplates();
                 renderWizardTokens();
+                // Apply style defaults from schema/settings.
+                if (state.schema && state.schema.settings) {
+                    const s = state.schema.settings || {};
+                    if ($styleLanguage.length && s.default_language) {
+                        setEnhancedSelectValue($styleLanguage, String(s.default_language));
+                    }
+                    if ($styleTone.length && s.default_tone) {
+                        setEnhancedSelectValue($styleTone, String(s.default_tone));
+                    }
+                    if ($styleUniqueness.length && s.default_uniqueness) {
+                        setEnhancedSelectValue($styleUniqueness, String(s.default_uniqueness));
+                    }
+                    if ($safetyNoMedFin.length) {
+                        $safetyNoMedFin.prop('checked', !!Number(s.safety_no_medical_financial || 0));
+                    }
+                    if ($safetyNoCompetitors.length) {
+                        $safetyNoCompetitors.prop('checked', !!Number(s.safety_no_competitors || 0));
+                    }
+                    if ($safetyNoCaps.length) {
+                        $safetyNoCaps.prop('checked', !!Number(s.safety_no_caps || 0));
+                    }
+                }
                 clearFilters();
                 state.selectedIds.clear();
                 updateSelectedCount();
@@ -2328,6 +2457,12 @@ jQuery(function ($) {
             const model = String($modelSelect.val() || state.defaultModel || 'auto');
             const varyLength = $varyLength.is(':checked') ? 1 : 0;
             const publishDateRange = collectPublishDateRangeForRun(scenario);
+            const styleLanguage = String($styleLanguage.val() || (state.schema && state.schema.settings && state.schema.settings.default_language) || 'auto');
+            const styleTone = String($styleTone.val() || (state.schema && state.schema.settings && state.schema.settings.default_tone) || 'neutral');
+            const styleUniqueness = String($styleUniqueness.val() || (state.schema && state.schema.settings && state.schema.settings.default_uniqueness) || 'medium');
+            const safetyNoMedFin = $safetyNoMedFin.is(':checked') ? 1 : 0;
+            const safetyNoCompetitors = $safetyNoCompetitors.is(':checked') ? 1 : 0;
+            const safetyNoCaps = $safetyNoCaps.is(':checked') ? 1 : 0;
 
             if (!postType) {
                 setRunStatus(jsT('Выберите тип записей.'), true);
@@ -2390,6 +2525,12 @@ jQuery(function ($) {
                 items_per_post: itemsPerPost,
                 rating_min: wooRatingRange.ratingMin,
                 rating_max: wooRatingRange.ratingMax,
+                style_language: styleLanguage,
+                style_tone: styleTone,
+                style_uniqueness: styleUniqueness,
+                safety_no_medical_financial: safetyNoMedFin,
+                safety_no_competitors: safetyNoCompetitors,
+                safety_no_caps: safetyNoCaps,
                 model: model,
                 template_id: templateId,
                 template_name: templateName,
@@ -2979,6 +3120,7 @@ jQuery(function ($) {
     initTemplatesPage();
     initSettingsPage();
     initReviewModal();
+    initLogsPage();
     initGenerateWizard();
     initRunProgressPage();
 

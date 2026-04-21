@@ -299,6 +299,9 @@ if (!class_exists('UCG_Api_Client')) {
             $settings = UCG_Settings::get();
             $api_key = $this->override_api_key !== '' ? $this->override_api_key : (isset($settings['api_key']) ? trim((string) $settings['api_key']) : '');
             if ($api_key === '') {
+                if (class_exists('UCG_Logger')) {
+                    UCG_Logger::warn('api', 'no_api_key', 'API key is missing.', array('path' => (string) $path));
+                }
                 return new WP_Error('ucg_no_api_key', __('Сначала добавьте API ключ на дашборде плагина.', 'unicontent-ai-generator'));
             }
 
@@ -322,6 +325,19 @@ if (!class_exists('UCG_Api_Client')) {
 
             $response = wp_remote_request($url, $args);
             if (is_wp_error($response)) {
+                if (class_exists('UCG_Logger')) {
+                    UCG_Logger::error(
+                        'api',
+                        'request_failed',
+                        'API request failed.',
+                        array(
+                            'method' => (string) $args['method'],
+                            'path' => (string) $path,
+                            'timeout' => isset($args['timeout']) ? (int) $args['timeout'] : 0,
+                            'error' => (string) $response->get_error_message(),
+                        )
+                    );
+                }
                 return new WP_Error('ucg_api_connection', $response->get_error_message());
             }
 
@@ -334,6 +350,19 @@ if (!class_exists('UCG_Api_Client')) {
             }
 
             $message = $this->extract_error_message($data, $raw_body);
+            if (class_exists('UCG_Logger')) {
+                UCG_Logger::warn(
+                    'api',
+                    'http_error',
+                    'API HTTP error.',
+                    array(
+                        'method' => (string) $args['method'],
+                        'path' => (string) $path,
+                        'status_code' => $status_code,
+                        'message' => (string) $message,
+                    )
+                );
+            }
             return new WP_Error('ucg_api_http_' . $status_code, $message, array('status_code' => $status_code, 'response' => $data));
         }
 
