@@ -24,6 +24,20 @@ if (!class_exists('UCG_Updater')) {
             add_filter('upgrader_post_install', [$this, 'after_install'], 10, 3);
         }
 
+        private function get_cached_update_info() {
+            // Use a site transient because plugin update data is site-wide and this also
+            // behaves better on multisite / with persistent object caches.
+            return get_site_transient('ucg_update_info');
+        }
+
+        private function set_cached_update_info($value, int $ttl) {
+            set_site_transient('ucg_update_info', $value, $ttl);
+        }
+
+        private function delete_cached_update_info() {
+            delete_site_transient('ucg_update_info');
+        }
+
         private function get_remote_info_from_server($force_refresh = false): ?object {
             $url = $this->version_url;
             if ($force_refresh) {
@@ -99,15 +113,21 @@ if (!class_exists('UCG_Updater')) {
                 return $transient;
             }
 
-            $force_refresh = isset($_GET['force-check']);
+            $force_refresh = !empty($_GET['force-check']);
             if ($force_refresh) {
-                delete_transient('ucg_update_info');
+                $this->delete_cached_update_info();
             }
 
-            $remote = get_transient('ucg_update_info');
-            if ($remote === false) {
+            $remote = $this->get_cached_update_info();
+            if ($remote === false || $remote === null) {
                 $remote = $this->get_remote_info($force_refresh);
-                set_transient('ucg_update_info', $remote, HOUR_IN_SECONDS);
+                // Don't cache a failed/empty lookup for an hour — otherwise WP "won't see"
+                // updates until the transient expires, even after a force-check.
+                if ($remote && !empty($remote->version) && !empty($remote->download_url)) {
+                    $this->set_cached_update_info($remote, HOUR_IN_SECONDS);
+                } else {
+                    $this->set_cached_update_info(null, 5 * MINUTE_IN_SECONDS);
+                }
             }
 
             // Используем версию из заголовка плагина (WP читает её сам), а не константу
@@ -166,7 +186,7 @@ if (!class_exists('UCG_Updater')) {
             $plugin_folder = WP_PLUGIN_DIR . DIRECTORY_SEPARATOR . 'unicontent-ai-generator';
             $wp_filesystem->move($result['destination'], $plugin_folder);
             $result['destination'] = $plugin_folder;
-            delete_transient('ucg_update_info');
+            $this->delete_cached_update_info();
             activate_plugin('unicontent-ai-generator/unicontent-ai-generator.php');
             return $result;
         }
