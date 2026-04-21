@@ -81,12 +81,15 @@ if (!class_exists('UCG_Generator')) {
             }
         }
 
-        public function process_queue($force = false, $batch_size_override = 0) {
+        public function process_queue($force = false, $batch_size_override = 0, $run_id_override = 0) {
             if (!$this->acquire_lock($force)) {
-                return;
+                return null;
             }
 
             $fatal_error = null;
+            $processed_now = 0;
+            $first_issue_type = '';
+            $first_issue_message = '';
 
             try {
                 $settings = UCG_Settings::get();
@@ -98,9 +101,24 @@ if (!class_exists('UCG_Generator')) {
                     $batch_size = max(1, min(100, $batch_size));
                 }
 
-                $run = UCG_DB::get_next_active_run();
+                $run_id_override = (int) $run_id_override;
+                $run = null;
+                if ($run_id_override > 0) {
+                    $candidate = UCG_DB::get_run($run_id_override);
+                    $candidate_status = $candidate && isset($candidate['status']) ? sanitize_key((string) $candidate['status']) : '';
+                    if ($candidate && $candidate_status !== '' && in_array($candidate_status, array('queued', 'running'), true)) {
+                        $run = $candidate;
+                    }
+                }
+                if (!$run) {
+                    $run = UCG_DB::get_next_active_run();
+                }
                 if (!$run || empty($run['id'])) {
-                    return;
+                    return array(
+                        'processed_now' => 0,
+                        'error_type' => '',
+                        'error_message' => '',
+                    );
                 }
 
                 $run_id = (int) $run['id'];
@@ -120,12 +138,17 @@ if (!class_exists('UCG_Generator')) {
                     if (UCG_DB::get_next_active_run()) {
                         self::schedule_fast_worker(1);
                     }
-                    return;
+                    return array(
+                        'processed_now' => 0,
+                        'error_type' => '',
+                        'error_message' => '',
+                    );
                 }
 
                 $api_client = new UCG_Api_Client();
                 foreach ($items as $item) {
                     $result = $this->process_item($item, $api_client, $settings);
+                    $processed_now++;
                     if (is_wp_error($result) && $this->is_fatal_api_error($result)) {
                         $fatal_error = $result->get_error_message();
                         UCG_DB::mark_pending_items_failed($run_id, $fatal_error);
@@ -139,6 +162,11 @@ if (!class_exists('UCG_Generator')) {
                         );
                         break;
                     }
+                    if (is_wp_error($result) && $first_issue_type === '') {
+                        $issue = $this->classify_issue($result);
+                        $first_issue_type = isset($issue['type']) ? sanitize_key((string) $issue['type']) : '';
+                        $first_issue_message = isset($issue['message']) ? (string) $issue['message'] : $result->get_error_message();
+                    }
                 }
 
                 UCG_DB::recalculate_run_counters($run_id);
@@ -151,6 +179,43 @@ if (!class_exists('UCG_Generator')) {
             } finally {
                 $this->release_lock();
             }
+
+            return array(
+                'processed_now' => (int) $processed_now,
+                'error_type' => (string) $first_issue_type,
+                'error_message' => (string) $first_issue_message,
+            );
+        }
+
+        protected function classify_issue(WP_Error $error) {
+            $code = (string) $error->get_error_code();
+            $message = (string) $error->get_error_message();
+            $type = 'unknown';
+
+            if (strpos($code, 'ucg_api_http_') === 0) {
+                $http = (int) substr($code, strlen('ucg_api_http_'));
+                if ($http === 429) {
+                    $type = 'rate_limit';
+                } elseif ($http === 408) {
+                    $type = 'timeout';
+                } elseif ($http >= 500 && $http <= 599) {
+                    $type = 'server_error';
+                } else {
+                    $type = 'http_error';
+                }
+            } elseif ($code === 'ucg_api_connection') {
+                $lower = strtolower($message);
+                if (strpos($lower, 'timed out') !== false || strpos($lower, 'timeout') !== false) {
+                    $type = 'timeout';
+                } else {
+                    $type = 'network';
+                }
+            }
+
+            return array(
+                'type' => $type,
+                'message' => $message,
+            );
         }
 
         protected function process_item($item, UCG_Api_Client $api_client, $settings) {
@@ -168,6 +233,8 @@ if (!class_exists('UCG_Generator')) {
             $seo_description_prompt_template = '';
             $publish_date_from = '';
             $publish_date_to = '';
+            $rating_min = 1;
+            $rating_max = 5;
 
             if ($item_id <= 0 || $post_id <= 0 || $run_id <= 0) {
                 return new WP_Error('ucg_invalid_queue_item', __('Некорректный элемент очереди.', 'unicontent-ai-generator'));
@@ -193,6 +260,8 @@ if (!class_exists('UCG_Generator')) {
                     }
                     $publish_date_from = isset($options['publish_date_from']) ? (string) $options['publish_date_from'] : '';
                     $publish_date_to = isset($options['publish_date_to']) ? (string) $options['publish_date_to'] : '';
+                    $rating_min = isset($options['rating_min']) ? (int) $options['rating_min'] : 1;
+                    $rating_max = isset($options['rating_max']) ? (int) $options['rating_max'] : 5;
                 }
             }
 
@@ -215,6 +284,17 @@ if (!class_exists('UCG_Generator')) {
                 $generation_mode = 'review';
             }
             $write_context = $this->build_write_context($scenario, $publish_date_from, $publish_date_to);
+            if ($scenario === 'woo_reviews') {
+                $rating_min = max(1, min(5, (int) $rating_min));
+                $rating_max = max(1, min(5, (int) $rating_max));
+                if ($rating_min > $rating_max) {
+                    $tmp = $rating_min;
+                    $rating_min = $rating_max;
+                    $rating_max = $tmp;
+                }
+                $write_context['rating_min'] = $rating_min;
+                $write_context['rating_max'] = $rating_max;
+            }
 
             if ($scenario === 'seo_tags') {
                 if ($seo_title_prompt_template === '' && $seo_description_prompt_template === '' && $template_body !== '') {
@@ -270,6 +350,7 @@ if (!class_exists('UCG_Generator')) {
                 }
 
                 $generated_title = $this->normalize_single_line_result(isset($response_title['text']) ? (string) $response_title['text'] : '');
+                $generated_title = $this->soft_trim_to_chars($generated_title, 70);
                 if ($generated_title === '') {
                     $next_status = ($attempts + 1) >= 3 ? 'failed' : 'queued';
                     UCG_DB::update_run_item(
@@ -305,6 +386,7 @@ if (!class_exists('UCG_Generator')) {
                 }
 
                 $generated_description = $this->normalize_single_line_result(isset($response_description['text']) ? (string) $response_description['text'] : '');
+                $generated_description = $this->soft_trim_to_chars($generated_description, 160);
                 if ($generated_description === '') {
                     $next_status = ($attempts + 1) >= 3 ? 'failed' : 'queued';
                     UCG_DB::update_run_item(
@@ -388,7 +470,7 @@ if (!class_exists('UCG_Generator')) {
                 );
                 return new WP_Error('ucg_prompt_empty', __('Промпт пустой.', 'unicontent-ai-generator'));
             }
-            $prompt = $this->build_prompt_for_comment_and_review_scenarios($prompt, $scenario);
+            $prompt = $this->build_prompt_for_comment_and_review_scenarios($prompt, $scenario, $rating_min, $rating_max);
 
             $response = $api_client->generate_text($prompt, $system_prompt, $max_tokens, $length_option_id, $vary_length, $model);
             if (is_wp_error($response)) {
@@ -459,18 +541,33 @@ if (!class_exists('UCG_Generator')) {
             return true;
         }
 
-        protected function build_prompt_for_comment_and_review_scenarios($prompt, $scenario) {
+        protected function build_prompt_for_comment_and_review_scenarios($prompt, $scenario, $rating_min = 1, $rating_max = 5) {
             $prompt = (string) $prompt;
             $scenario = sanitize_key((string) $scenario);
+            $rating_min = (int) $rating_min;
+            $rating_max = (int) $rating_max;
+            $rating_min = max(1, min(5, $rating_min));
+            $rating_max = max(1, min(5, $rating_max));
+            if ($rating_min > $rating_max) {
+                $tmp = $rating_min;
+                $rating_min = $rating_max;
+                $rating_max = $tmp;
+            }
 
             if ($scenario === 'comments') {
-                $instruction = __('Верни только JSON без markdown: {"author_name":"...","content":"..."}.', 'unicontent-ai-generator');
-                return $prompt . "\n\n" . $instruction;
+                $instruction_ru = __('Верни только ОДИН JSON-объект без markdown и текста вокруг: {"author_name":"...","content":"..."}. Не возвращай массивы, списки, несколько объектов или несколько комментариев.', 'unicontent-ai-generator');
+                $instruction_en = 'Return ONLY ONE JSON object (not an array, not a list), no markdown, no extra text: {"author_name":"...","content":"..."}. Do NOT return multiple objects.';
+                return $prompt . "\n\n" . $instruction_ru . "\n" . $instruction_en;
             }
 
             if ($scenario === 'woo_reviews') {
-                $instruction = __('Верни только JSON без markdown: {"author_name":"...","content":"...","rating":5}. rating от 1 до 5.', 'unicontent-ai-generator');
-                return $prompt . "\n\n" . $instruction;
+                $range_ru = sprintf(__('Рейтинг (rating) должен быть целым числом в диапазоне %d–%d.', 'unicontent-ai-generator'), $rating_min, $rating_max);
+                $range_en = 'rating must be an integer in range ' . $rating_min . '..' . $rating_max . '.';
+                $instruction_ru = __('Верни только ОДИН JSON-объект без markdown и текста вокруг: {"author_name":"...","content":"...","rating":5}. Не возвращай массивы, списки, несколько объектов или несколько отзывов.', 'unicontent-ai-generator')
+                    . ' ' . $range_ru;
+                $instruction_en = 'Return ONLY ONE JSON object (not an array, not a list), no markdown, no extra text: {"author_name":"...","content":"...","rating":5}. Do NOT return multiple objects. '
+                    . $range_en;
+                return $prompt . "\n\n" . $instruction_ru . "\n" . $instruction_en;
             }
 
             return $prompt;
@@ -526,11 +623,65 @@ if (!class_exists('UCG_Generator')) {
                 return $prompt;
             }
 
-            $instruction = $field === 'title'
-                ? __('Верни только готовый SEO title без кавычек, markdown и комментариев.', 'unicontent-ai-generator')
-                : __('Верни только готовый SEO description без кавычек, markdown и комментариев.', 'unicontent-ai-generator');
+            if ($field === 'title') {
+                $instruction_ru = __('Верни только готовый SEO title без кавычек, markdown и комментариев. Длина: 60–70 символов.', 'unicontent-ai-generator');
+                $instruction_en = 'Return only the final SEO title (no quotes, no markdown, no comments). Length: 60-70 characters.';
+                return $prompt . "\n\n" . $instruction_ru . "\n" . $instruction_en;
+            }
 
-            return $prompt . "\n\n" . $instruction;
+            $instruction_ru = __('Верни только готовый SEO description без кавычек, markdown и комментариев. Длина: 140–160 символов.', 'unicontent-ai-generator');
+            $instruction_en = 'Return only the final SEO description (no quotes, no markdown, no comments). Length: 140-160 characters.';
+
+            return $prompt . "\n\n" . $instruction_ru . "\n" . $instruction_en;
+        }
+
+        protected function soft_trim_to_chars($text, $max_chars) {
+            $text = trim((string) $text);
+            $max_chars = max(1, (int) $max_chars);
+            if ($text === '') {
+                return '';
+            }
+            if (function_exists('mb_strlen') && function_exists('mb_substr')) {
+                if (mb_strlen($text, 'UTF-8') <= $max_chars) {
+                    return $text;
+                }
+                $cut = rtrim(mb_substr($text, 0, $max_chars, 'UTF-8'));
+                $search_from = max(0, (int) floor($max_chars * 0.65));
+                $slice = mb_substr($cut, $search_from, null, 'UTF-8');
+                $breaks = array(' ', '.', '!', '?', ';', ',', ':');
+                $best_pos = -1;
+                foreach ($breaks as $br) {
+                    $pos = mb_strrpos($slice, $br, 0, 'UTF-8');
+                    if ($pos !== false) {
+                        $best_pos = max($best_pos, $pos);
+                    }
+                }
+                if ($best_pos >= 0) {
+                    $final_len = $search_from + $best_pos;
+                    $cut = rtrim(mb_substr($cut, 0, $final_len + 1, 'UTF-8'));
+                }
+                return trim($cut);
+            }
+
+            if (strlen($text) <= $max_chars) {
+                return $text;
+            }
+            $cut = rtrim(substr($text, 0, $max_chars));
+            $search_from = max(0, (int) floor($max_chars * 0.65));
+            $slice = substr($cut, $search_from);
+            $breaks = array(' ', '.', '!', '?', ';', ',', ':');
+            $best_pos = -1;
+            foreach ($breaks as $br) {
+                $pos = strrpos($slice, $br);
+                if ($pos !== false) {
+                    $best_pos = max($best_pos, $pos);
+                }
+            }
+            if ($best_pos >= 0) {
+                $final_len = $search_from + $best_pos;
+                $cut = rtrim(substr($cut, 0, $final_len + 1));
+            }
+            return trim($cut);
         }
 
         protected function normalize_single_line_result($text) {

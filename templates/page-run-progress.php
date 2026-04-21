@@ -45,6 +45,11 @@
                 </div>
             </div>
 
+            <div class="ucg-actions-row" id="ucg-run-progress-actions" style="display:none;">
+                <button type="button" class="button button-primary" id="ucg-run-continue">Продолжить</button>
+                <span class="ucg-muted" id="ucg-run-continue-hint"></span>
+            </div>
+
             <div class="ucg-run-log" id="ucg-run-log">
                 <div class="ucg-muted">Логи появятся после обработки первых записей.</div>
             </div>

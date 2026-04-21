@@ -1066,6 +1066,9 @@ jQuery(function ($) {
         const $publishDateRangeWrap = $('#ucg-publish-date-range-wrap');
         const $publishDateFrom = $('#ucg-wizard-publish-date-from');
         const $publishDateTo = $('#ucg-wizard-publish-date-to');
+        const $wooRatingRangeWrap = $('#ucg-woo-rating-range-wrap');
+        const $wooRatingMin = $('#ucg-woo-rating-min');
+        const $wooRatingMax = $('#ucg-woo-rating-max');
         const $wizardTokenSearch = $('#ucg-wizard-token-search');
         const $tokens = $('#ucg-wizard-tokens');
         const $filterRows = $('#ucg-filter-rows');
@@ -1111,12 +1114,57 @@ jQuery(function ($) {
             return normalized === 'comments' || normalized === 'woo_reviews';
         }
 
+        function scenarioSupportsWooRatingRange(scenario) {
+            const normalized = String(scenario || '').trim();
+            return normalized === 'woo_reviews';
+        }
+
         function normalizeItemsPerPost(value) {
             const parsed = Number(value || 1);
             if (!Number.isFinite(parsed)) {
                 return 1;
             }
             return Math.max(1, Math.min(50, Math.round(parsed)));
+        }
+
+        function normalizeWooRatingValue(value) {
+            const parsed = Number(value || 5);
+            if (!Number.isFinite(parsed)) {
+                return 5;
+            }
+            return Math.max(1, Math.min(5, Math.round(parsed)));
+        }
+
+        function toggleWooRatingRangeControls(scenario) {
+            const enabled = scenarioSupportsWooRatingRange(scenario);
+            if ($wooRatingRangeWrap.length) {
+                $wooRatingRangeWrap.prop('hidden', !enabled).toggle(enabled);
+            }
+            if (!enabled) {
+                if ($wooRatingMin.length) {
+                    $wooRatingMin.val('1');
+                }
+                if ($wooRatingMax.length) {
+                    $wooRatingMax.val('5');
+                }
+            }
+        }
+
+        function collectWooRatingRangeForRun(scenario) {
+            if (!scenarioSupportsWooRatingRange(scenario)) {
+                return { valid: true, ratingMin: 1, ratingMax: 5 };
+            }
+
+            let ratingMin = normalizeWooRatingValue($wooRatingMin.val());
+            let ratingMax = normalizeWooRatingValue($wooRatingMax.val());
+
+            if (ratingMin > ratingMax) {
+                const tmp = ratingMin;
+                ratingMin = ratingMax;
+                ratingMax = tmp;
+            }
+
+            return { valid: true, ratingMin: ratingMin, ratingMax: ratingMax };
         }
 
         function applyItemsPerPostVisibility(scenario) {
@@ -1225,6 +1273,7 @@ jQuery(function ($) {
             }
             togglePublishDateRangeControls(scenario);
             applyItemsPerPostVisibility(scenario);
+            toggleWooRatingRangeControls(scenario);
         }
 
         function setRunStatus(message, isError) {
@@ -2267,6 +2316,7 @@ jQuery(function ($) {
             const postType = String($postType.val() || '');
             const targetField = String($targetField.val() || '');
             const itemsPerPost = scenarioSupportsItemsPerPost(scenario) ? normalizeItemsPerPost($itemsPerPost.val()) : 1;
+            const wooRatingRange = collectWooRatingRangeForRun(scenario);
             const templateId = Number($templateSelect.val() || 0);
             const templateName = String($templateName.val() || '').trim();
             const templateBody = String($templateBody.val() || '').trim();
@@ -2293,6 +2343,11 @@ jQuery(function ($) {
 
             if (!publishDateRange.valid) {
                 setRunStatus(publishDateRange.message || jsT('Проверьте диапазон дат публикации.'), true);
+                return;
+            }
+
+            if (!wooRatingRange.valid) {
+                setRunStatus(wooRatingRange.message || jsT('Проверьте диапазон рейтинга.'), true);
                 return;
             }
 
@@ -2333,6 +2388,8 @@ jQuery(function ($) {
                 post_type: postType,
                 target_field: targetField,
                 items_per_post: itemsPerPost,
+                rating_min: wooRatingRange.ratingMin,
+                rating_max: wooRatingRange.ratingMax,
                 model: model,
                 template_id: templateId,
                 template_name: templateName,
@@ -2386,6 +2443,26 @@ jQuery(function ($) {
                     $(this).val(String(normalized));
                     renderRunSummary();
                 });
+            }
+
+            if ($wooRatingMin.length && $wooRatingMax.length) {
+                const normalizeWooRatingInputs = function () {
+                    const scenario = getScenario();
+                    if (!scenarioSupportsWooRatingRange(scenario)) {
+                        return;
+                    }
+                    let ratingMin = normalizeWooRatingValue($wooRatingMin.val());
+                    let ratingMax = normalizeWooRatingValue($wooRatingMax.val());
+                    if (ratingMin > ratingMax) {
+                        const tmp = ratingMin;
+                        ratingMin = ratingMax;
+                        ratingMax = tmp;
+                    }
+                    $wooRatingMin.val(String(ratingMin));
+                    $wooRatingMax.val(String(ratingMax));
+                };
+                $wooRatingMin.on('change', normalizeWooRatingInputs);
+                $wooRatingMax.on('change', normalizeWooRatingInputs);
             }
 
             $('#ucg-step-1-next').on('click', function () {
@@ -2634,7 +2711,12 @@ jQuery(function ($) {
         const $log = $('#ucg-run-log');
         const $status = $('#ucg-run-progress-status');
         const $reviewLink = $('#ucg-run-review-link');
+        const $actions = $('#ucg-run-progress-actions');
+        const $continueBtn = $('#ucg-run-continue');
+        const $continueHint = $('#ucg-run-continue-hint');
         let timer = null;
+        let inFlight = false;
+        let lastKnownBatch = 0;
 
         function clearTimer() {
             if (timer) {
@@ -2705,17 +2787,74 @@ jQuery(function ($) {
             const queued = Number(run.queued_items || 0);
             const success = Number(run.success_items || 0);
             const failed = Number(run.failed_items || 0);
+            const effectiveBatch = Number(run.effective_batch_size || 0);
+            if (effectiveBatch > 0) {
+                lastKnownBatch = effectiveBatch;
+            }
 
             if ($title.length) {
                 $title.text(jsT('Запуск #') + currentRunId);
             }
             setChipStatus(run.status, run.status_label);
             $progressBar.css('width', progress + '%');
-            $stats.text(progress + jsT('% • обработано ') + processed + jsT(' из ') + total + jsT(' • в очереди ') + queued + jsT(' • ошибок ') + failed + jsT(' • готово ') + success);
+            const batchSuffix = lastKnownBatch > 0 ? (jsT(' • шаг ') + lastKnownBatch) : '';
+            $stats.text(progress + jsT('% • обработано ') + processed + jsT(' из ') + total + jsT(' • в очереди ') + queued + jsT(' • ошибок ') + failed + jsT(' • готово ') + success + batchSuffix);
             renderLog(Array.isArray(data.logs) ? data.logs : []);
+
+            const issue = data.issue && typeof data.issue === 'object' ? data.issue : null;
+            if (issue && (issue.message || issue.type)) {
+                if ($actions.length) {
+                    $actions.show();
+                }
+                if ($continueHint.length) {
+                    const msg = String(issue.message || jsT('Проблема при генерации. Попробуйте продолжить меньшими шагами.'));
+                    $continueHint.text(msg);
+                }
+                setStatus(jsT('Похоже, есть ограничения/таймаут. Нажмите «Продолжить» — продолжим меньшими шагами.'), true);
+            } else {
+                if ($actions.length) {
+                    $actions.hide();
+                }
+                if ($continueHint.length) {
+                    $continueHint.text('');
+                }
+            }
         }
 
-        function poll() {
+        function processStep(forceSmaller, done) {
+            $.post(ucgAdmin.ajaxUrl, {
+                action: 'ucg_process_now',
+                nonce: ucgAdmin.nonce,
+                run_id: runId,
+                force_smaller: forceSmaller ? 1 : 0
+            }).done(function (response) {
+                if (!response || !response.success) {
+                    const msg = response && response.data && response.data.message ? response.data.message : jsT('Не удалось обработать очередь.');
+                    setStatus(msg, true);
+                    if (typeof done === 'function') {
+                        done({ ok: false, recommended_poll_ms: 5000 });
+                    }
+                    return;
+                }
+                const data = response.data || {};
+                if (data && typeof data.effective_batch_size !== 'undefined') {
+                    lastKnownBatch = Number(data.effective_batch_size || lastKnownBatch || 0);
+                }
+                if (data.issue && data.issue.message) {
+                    setStatus(String(data.issue.message), true);
+                }
+                if (typeof done === 'function') {
+                    done({ ok: true, recommended_poll_ms: Number(data.recommended_poll_ms || 1500) });
+                }
+            }).fail(function () {
+                setStatus(jsT('AJAX ошибка при обработке очереди.'), true);
+                if (typeof done === 'function') {
+                    done({ ok: false, recommended_poll_ms: 5000 });
+                }
+            });
+        }
+
+        function pollStatus(nextDelay) {
             $.post(ucgAdmin.ajaxUrl, {
                 action: 'ucg_run_status',
                 nonce: ucgAdmin.nonce,
@@ -2743,18 +2882,42 @@ jQuery(function ($) {
                     return;
                 }
 
-                const run = data.run || {};
-                const runStatus = String(run.status || '');
-                const processed = Number(run.processed_items || 0);
-                const nextPollDelay = (runStatus === 'queued' || processed <= 0) ? 1000 : 3000;
-
+                const delay = typeof nextDelay === 'number' && nextDelay > 0 ? nextDelay : 1500;
                 setStatus(jsT('Генерация в процессе. Страница обновляется автоматически.'), false);
                 clearTimer();
-                timer = window.setTimeout(poll, nextPollDelay);
+                timer = window.setTimeout(poll, delay);
             }).fail(function () {
                 setStatus(jsT('AJAX ошибка при обновлении прогресса.'), true);
                 clearTimer();
                 timer = window.setTimeout(poll, 5000);
+            });
+        }
+
+        function poll() {
+            if (inFlight) {
+                clearTimer();
+                timer = window.setTimeout(poll, 1500);
+                return;
+            }
+            inFlight = true;
+            processStep(false, function (step) {
+                pollStatus(step && step.recommended_poll_ms ? step.recommended_poll_ms : 1500);
+                inFlight = false;
+            });
+        }
+
+        if ($continueBtn.length) {
+            $continueBtn.on('click', function () {
+                if (inFlight) {
+                    return;
+                }
+                inFlight = true;
+                setButtonLoading($continueBtn, true);
+                processStep(true, function () {
+                    setButtonLoading($continueBtn, false);
+                    pollStatus(1500);
+                    inFlight = false;
+                });
             });
         }
 

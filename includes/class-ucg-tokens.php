@@ -400,9 +400,19 @@ if (!class_exists('UCG_Tokens')) {
 
             if ($comment_type === 'review') {
                 $rating = isset($payload['rating']) ? (int) $payload['rating'] : 5;
+                $rating_min = isset($context['rating_min']) ? (int) $context['rating_min'] : 1;
+                $rating_max = isset($context['rating_max']) ? (int) $context['rating_max'] : 5;
+                $rating_min = max(1, min(5, $rating_min));
+                $rating_max = max(1, min(5, $rating_max));
+                if ($rating_min > $rating_max) {
+                    $tmp = $rating_min;
+                    $rating_min = $rating_max;
+                    $rating_max = $tmp;
+                }
                 if ($rating < 1 || $rating > 5) {
                     $rating = 5;
                 }
+                $rating = max($rating_min, min($rating_max, $rating));
                 update_comment_meta($comment_id, 'rating', $rating);
             }
 
@@ -581,13 +591,69 @@ if (!class_exists('UCG_Tokens')) {
 
             $decoded = json_decode($text, true);
             if (is_array($decoded)) {
+                // If it's a list of objects, use the first object.
+                $first_key = array_key_exists(0, $decoded) ? 0 : null;
+                if ($first_key !== null && is_array($decoded[$first_key])) {
+                    return $decoded[$first_key];
+                }
                 return $decoded;
             }
 
-            if (preg_match('/\{[\s\S]*\}/u', $text, $match)) {
-                $decoded_fragment = json_decode((string) $match[0], true);
-                if (is_array($decoded_fragment)) {
-                    return $decoded_fragment;
+            // If the model wrapped the response in markdown, strip code fences crudely.
+            $text = preg_replace('/^```[a-zA-Z0-9_-]*\\s*/u', '', $text);
+            $text = preg_replace('/```\\s*$/u', '', (string) $text);
+            $text = trim((string) $text);
+
+            // Find the first valid JSON object fragment by scanning braces.
+            $len = strlen($text);
+            for ($i = 0; $i < $len; $i++) {
+                if ($text[$i] !== '{' && $text[$i] !== '[') {
+                    continue;
+                }
+                $open = $text[$i];
+                $close = $open === '{' ? '}' : ']';
+                $depth = 0;
+                $in_string = false;
+                $escape = false;
+                for ($j = $i; $j < $len; $j++) {
+                    $ch = $text[$j];
+                    if ($in_string) {
+                        if ($escape) {
+                            $escape = false;
+                            continue;
+                        }
+                        if ($ch === '\\\\') {
+                            $escape = true;
+                            continue;
+                        }
+                        if ($ch === '\"') {
+                            $in_string = false;
+                        }
+                        continue;
+                    }
+                    if ($ch === '\"') {
+                        $in_string = true;
+                        continue;
+                    }
+                    if ($ch === $open) {
+                        $depth++;
+                        continue;
+                    }
+                    if ($ch === $close) {
+                        $depth--;
+                        if ($depth === 0) {
+                            $fragment = substr($text, $i, $j - $i + 1);
+                            $decoded_fragment = json_decode((string) $fragment, true);
+                            if (is_array($decoded_fragment)) {
+                                // If it's a list, prefer the first object.
+                                if (array_key_exists(0, $decoded_fragment) && is_array($decoded_fragment[0])) {
+                                    return $decoded_fragment[0];
+                                }
+                                return $decoded_fragment;
+                            }
+                            break;
+                        }
+                    }
                 }
             }
 

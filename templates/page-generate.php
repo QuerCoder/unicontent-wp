@@ -303,6 +303,32 @@
                     <p class="ucg-muted ucg-field-hint">Для комментариев и отзывов: если диапазон не задан, используется текущее время и дата.</p>
                 </div>
 
+                <div class="ucg-date-range-block" id="ucg-woo-rating-range-wrap" hidden>
+                    <div class="ucg-grid-2 ucg-date-range-grid">
+                        <label class="ucg-field">
+                            <span>Рейтинг: от</span>
+                            <select id="ucg-woo-rating-min" class="ucg-enhanced-select" data-search-enabled="false">
+                                <option value="1">1</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                                <option value="5">5</option>
+                            </select>
+                        </label>
+                        <label class="ucg-field">
+                            <span>Рейтинг: до</span>
+                            <select id="ucg-woo-rating-max" class="ucg-enhanced-select" data-search-enabled="false">
+                                <option value="1">1</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                                <option value="5" selected>5</option>
+                            </select>
+                        </label>
+                    </div>
+                    <p class="ucg-muted ucg-field-hint">Для WooCommerce отзывов: модель будет генерировать рейтинг в выбранном диапазоне.</p>
+                </div>
+
                 <div id="ucg-template-body-standard-wrap">
                     <label class="ucg-field">
                         <span>Текст шаблона</span>

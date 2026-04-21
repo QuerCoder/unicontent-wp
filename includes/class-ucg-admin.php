@@ -28,6 +28,7 @@ if (!class_exists('UCG_Admin')) {
             add_action('wp_ajax_ucg_wizard_load_template', array($this, 'ajax_wizard_load_template'));
             add_action('wp_ajax_ucg_wizard_create_run', array($this, 'ajax_wizard_create_run'));
             add_action('wp_ajax_ucg_run_status', array($this, 'ajax_run_status'));
+            add_action('wp_ajax_ucg_process_now', array($this, 'ajax_process_now'));
             add_action('wp_ajax_ucg_search_runs', array($this, 'ajax_search_runs'));
 
             add_action('admin_post_ucg_save_template', array($this, 'handle_save_template'));
@@ -632,6 +633,94 @@ if (!class_exists('UCG_Admin')) {
             $this->redirect_with_notice('ucg-runs', __('Очередь обработана одним шагом.', 'unicontent-ai-generator'));
         }
 
+        public function ajax_process_now() {
+            $this->guard_ajax();
+
+            $run_id = $this->get_request_int($_POST, 'run_id', 0);
+            if ($run_id <= 0) {
+                wp_send_json_error(array('message' => __('Некорректный ID запуска.', 'unicontent-ai-generator')));
+            }
+
+            $run = UCG_DB::get_run($run_id);
+            if (!$run) {
+                wp_send_json_error(array('message' => __('Запуск не найден.', 'unicontent-ai-generator')));
+            }
+
+            $status = sanitize_key((string) $run['status']);
+            if (in_array($status, array('completed', 'failed'), true)) {
+                wp_send_json_success(array(
+                    'ok' => true,
+                    'skipped' => true,
+                    'reason' => 'finished',
+                ));
+            }
+
+            $force_smaller = !empty($_POST['force_smaller']);
+            $max_batch = 50;
+
+            $settings = UCG_Settings::get();
+            $default_batch = isset($settings['batch_size']) ? (int) $settings['batch_size'] : 20;
+            $default_batch = max(1, min($max_batch, $default_batch));
+
+            $batch_key = 'ucg_effective_batch_' . $run_id;
+            $effective_batch = (int) get_transient($batch_key);
+            if ($effective_batch <= 0) {
+                $effective_batch = $default_batch;
+            }
+            $effective_batch = max(1, min($max_batch, $effective_batch));
+            $previous_batch = $effective_batch;
+
+            if ($force_smaller && $effective_batch > 1) {
+                $effective_batch = max(1, (int) floor($effective_batch / 2));
+            }
+
+            $generator = new UCG_Generator();
+            $stats = $generator->process_queue(true, $effective_batch, $run_id);
+            if (!is_array($stats)) {
+                $stats = array();
+            }
+
+            $processed_now = isset($stats['processed_now']) ? (int) $stats['processed_now'] : 0;
+            $error_type = isset($stats['error_type']) ? sanitize_key((string) $stats['error_type']) : '';
+            $error_message = isset($stats['error_message']) ? (string) $stats['error_message'] : '';
+
+            $issue_key = 'ucg_last_issue_' . $run_id;
+            $had_issue = $error_type !== '' && $error_message !== '';
+
+            if ($had_issue) {
+                // Back off aggressively on any transient API/network issue.
+                if ($effective_batch > 1) {
+                    $effective_batch = max(1, (int) floor($effective_batch / 2));
+                }
+                set_transient($issue_key, array(
+                    'type' => $error_type,
+                    'message' => $error_message,
+                    'at' => time(),
+                ), HOUR_IN_SECONDS);
+            } else {
+                delete_transient($issue_key);
+                // Ramp up slowly when we consistently process full batches.
+                if ($processed_now >= (int) $previous_batch && $effective_batch < $max_batch) {
+                    $effective_batch = min($max_batch, $effective_batch + 2);
+                }
+            }
+
+            set_transient($batch_key, $effective_batch, HOUR_IN_SECONDS);
+
+            $recommended_poll_ms = $had_issue ? 5000 : 1500;
+            if ($processed_now <= 0) {
+                $recommended_poll_ms = 3000;
+            }
+
+            wp_send_json_success(array(
+                'ok' => true,
+                'processed_now' => $processed_now,
+                'effective_batch_size' => $effective_batch,
+                'recommended_poll_ms' => $recommended_poll_ms,
+                'issue' => $had_issue ? array('type' => $error_type, 'message' => $error_message) : null,
+            ));
+        }
+
         public function ajax_test_connection() {
             $this->guard_ajax();
 
@@ -859,6 +948,18 @@ if (!class_exists('UCG_Admin')) {
             $status = sanitize_key((string) $run['status']);
             $is_finished = in_array($status, array('completed', 'failed'), true);
 
+            $batch_key = 'ucg_effective_batch_' . $run_id;
+            $effective_batch = (int) get_transient($batch_key);
+            if ($effective_batch <= 0) {
+                $settings = UCG_Settings::get();
+                $default_batch = isset($settings['batch_size']) ? (int) $settings['batch_size'] : 20;
+                $effective_batch = max(1, min(50, $default_batch));
+            }
+            $issue = get_transient('ucg_last_issue_' . $run_id);
+            if (!is_array($issue)) {
+                $issue = null;
+            }
+
             $log_rows = UCG_DB::get_run_items_log($run_id, 20);
             $logs = array();
             foreach ($log_rows as $row) {
@@ -889,9 +990,15 @@ if (!class_exists('UCG_Admin')) {
                         'success_items' => $success,
                         'failed_items' => $failed,
                         'queued_items' => $queued,
+                        'effective_batch_size' => $effective_batch,
                     ),
                     'logs' => $logs,
                     'is_finished' => $is_finished,
+                    'issue' => $issue ? array(
+                        'type' => isset($issue['type']) ? sanitize_key((string) $issue['type']) : '',
+                        'message' => isset($issue['message']) ? (string) $issue['message'] : '',
+                        'at' => isset($issue['at']) ? (int) $issue['at'] : 0,
+                    ) : null,
                     'review_url' => admin_url('admin.php?page=ucg-review&run_id=' . $run_id),
                     'runs_url' => admin_url('admin.php?page=ucg-runs'),
                 )
@@ -1024,6 +1131,8 @@ if (!class_exists('UCG_Admin')) {
             );
             $target_field = sanitize_text_field($this->get_request_string($_POST, 'target_field', ''));
             $items_per_post = $this->get_request_int($_POST, 'items_per_post', 1);
+            $rating_min = $this->get_request_int($_POST, 'rating_min', 1);
+            $rating_max = $this->get_request_int($_POST, 'rating_max', 5);
             $template_id = $this->get_request_int($_POST, 'template_id', 0);
             $template_name = sanitize_text_field($this->get_request_string($_POST, 'template_name', ''));
             $template_body = sanitize_textarea_field($this->get_request_string($_POST, 'template_body', ''));
@@ -1060,6 +1169,20 @@ if (!class_exists('UCG_Admin')) {
                 }
             } else {
                 $items_per_post = 1;
+            }
+
+            if ($scenario === 'woo_reviews') {
+                $rating_min = max(1, min(5, (int) $rating_min));
+                $rating_max = max(1, min(5, (int) $rating_max));
+                if ($rating_min > $rating_max) {
+                    $tmp = $rating_min;
+                    $rating_min = $rating_max;
+                    $rating_max = $tmp;
+                }
+            } else {
+                // Keep defaults for other scenarios (not used).
+                $rating_min = 1;
+                $rating_max = 5;
             }
 
             if ($this->scenario_supports_publish_date_range($scenario)) {
@@ -1223,6 +1346,8 @@ if (!class_exists('UCG_Admin')) {
                 'publish_date_from' => $publish_date_from,
                 'publish_date_to' => $publish_date_to,
                 'items_per_post' => $items_per_post,
+                'rating_min' => $rating_min,
+                'rating_max' => $rating_max,
             );
 
             $run_id = UCG_DB::create_run($post_type, $target_field, $active_template_id, get_current_user_id(), $options);
