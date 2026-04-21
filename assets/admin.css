@@ -307,6 +307,10 @@ body.ucg-review-modal-open {
     pointer-events: none;
 }
 
+.ucg-scenario-card.is-disabled .ucg-scenario-card__input {
+    display: none;
+}
+
 .ucg-scenario-card__surface {
     display: grid;
     grid-template-columns: auto 1fr auto;
@@ -357,10 +361,12 @@ body.ucg-review-modal-open {
     font-size: 11px;
     color: var(--ucg-text-muted);
     background: rgba(24, 32, 42, 0.08);
-    border-radius: 999px;
+    border-radius: 12px;
     padding: 4px 8px;
-    line-height: 1;
-    white-space: nowrap;
+    line-height: 1.2;
+    white-space: normal;
+    text-align: center;
+    max-width: 120px;
 }
 
 .ucg-scenario-card.is-selected .ucg-scenario-card__surface {
@@ -1275,6 +1281,15 @@ body.ucg-review-modal-open {
 
 .ucg-field-hint {
     margin: -2px 0 6px;
+}
+
+#ucg-wizard-items-per-post-wrap .ucg-field-hint {
+    font-size: 11px;
+    line-height: 1.2;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
 }
 
 .ucg-vary-length-block .ucg-field-hint {

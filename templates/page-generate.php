@@ -66,7 +66,7 @@
                                             <?php
                                             $unavailable_label = __('Неактивен', 'unicontent-ai-generator');
                                             if ($scenario_value === 'woo_reviews') {
-                                                $unavailable_label = __('WooCommerce не активен', 'unicontent-ai-generator');
+                                                $unavailable_label = __('WooCommerce отключен', 'unicontent-ai-generator');
                                             } elseif ($scenario_value === 'seo_tags') {
                                                 $unavailable_label = __('SEO плагин не найден', 'unicontent-ai-generator');
                                             }
@@ -136,7 +136,7 @@
                             step="1"
                             value="1"
                         >
-                        <p class="ucg-muted ucg-field-hint">Сколько комментариев/отзывов генерировать для каждой выбранной записи.</p>
+                        <p class="ucg-muted ucg-field-hint">Сколько комментариев/отзывов сгенерировать на одну запись.</p>
                     </label>
 
                 </div>
