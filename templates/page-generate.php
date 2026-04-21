@@ -63,7 +63,15 @@
                                             <?php endif; ?>
                                         </span>
                                         <?php if (!$scenario_available) : ?>
-                                            <span class="ucg-scenario-card__meta">Скоро</span>
+                                            <?php
+                                            $unavailable_label = __('Неактивен', 'unicontent-ai-generator');
+                                            if ($scenario_value === 'woo_reviews') {
+                                                $unavailable_label = __('WooCommerce не активен', 'unicontent-ai-generator');
+                                            } elseif ($scenario_value === 'seo_tags') {
+                                                $unavailable_label = __('SEO плагин не найден', 'unicontent-ai-generator');
+                                            }
+                                            ?>
+                                            <span class="ucg-scenario-card__meta"><?php echo esc_html($unavailable_label); ?></span>
                                         <?php endif; ?>
                                     </span>
                                 </label>
