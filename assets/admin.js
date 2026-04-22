@@ -1547,8 +1547,11 @@ jQuery(function ($) {
             }
             state.step = step;
 
-            $('.ucg-stepper__item').removeClass('is-active');
+            $('.ucg-stepper__item').removeClass('is-active is-done');
             $('.ucg-stepper__item[data-step-target="' + step + '"]').addClass('is-active');
+            for (var _i = 1; _i < step; _i++) {
+                $('.ucg-stepper__item[data-step-target="' + _i + '"]').addClass('is-done');
+            }
 
             $('.ucg-step-panel').removeClass('is-active');
             $('.ucg-step-panel[data-step="' + step + '"]').addClass('is-active');

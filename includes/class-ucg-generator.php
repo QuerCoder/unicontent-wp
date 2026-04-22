@@ -683,6 +683,39 @@ if (!class_exists('UCG_Generator')) {
             return $prompt . "\n\n" . $instruction_ru . "\n" . $instruction_en;
         }
 
+        // Public wrappers for wizard preview / admin-side helpers.
+        public function build_effective_system_prompt_for_preview(
+            $base_system_prompt,
+            $scenario,
+            $style_language,
+            $style_tone,
+            $style_uniqueness,
+            $run_seed,
+            $run_id,
+            $post_id,
+            $item_index
+        ) {
+            return $this->build_effective_system_prompt(
+                $base_system_prompt,
+                $scenario,
+                $style_language,
+                $style_tone,
+                $style_uniqueness,
+                $run_seed,
+                $run_id,
+                $post_id,
+                $item_index
+            );
+        }
+
+        public function build_prompt_for_single_seo_field_for_preview($prompt, $field) {
+            return $this->build_prompt_for_single_seo_field($prompt, $field);
+        }
+
+        public function build_prompt_for_comment_and_review_scenarios_for_preview($prompt, $scenario, $rating_min = 1, $rating_max = 5) {
+            return $this->build_prompt_for_comment_and_review_scenarios($prompt, $scenario, $rating_min, $rating_max);
+        }
+
         protected function build_effective_system_prompt(
             $base_system_prompt,
             $scenario,

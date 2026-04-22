@@ -13,23 +13,25 @@
             </p>
         </section>
     <?php else : ?>
-        <div class="ucg-card ucg-wizard" id="ucg-wizard">
+        <div class="ucg-wizard" id="ucg-wizard">
             <div class="ucg-stepper">
                 <button type="button" class="ucg-stepper__item is-active" data-step-target="1">
                     <span class="ucg-stepper__num">1</span>
                     <span class="ucg-stepper__label">Сценарий</span>
                 </button>
+                <span class="ucg-stepper__sep" aria-hidden="true">|</span>
                 <button type="button" class="ucg-stepper__item" data-step-target="2">
                     <span class="ucg-stepper__num">2</span>
                     <span class="ucg-stepper__label">Фильтрация</span>
                 </button>
+                <span class="ucg-stepper__sep" aria-hidden="true">|</span>
                 <button type="button" class="ucg-stepper__item" data-step-target="3">
                     <span class="ucg-stepper__num">3</span>
                     <span class="ucg-stepper__label">Запуск</span>
                 </button>
             </div>
 
-            <section class="ucg-step-panel is-active" data-step="1">
+            <section class="ucg-card ucg-step-panel is-active" data-step="1">
                 <label class="ucg-field">
                     <span>Что генерировать:</span>
                     <div class="ucg-scenario-picker" id="ucg-wizard-scenario-picker">
@@ -146,7 +148,7 @@
                 </div>
             </section>
 
-            <section class="ucg-step-panel" data-step="2">
+            <section class="ucg-card ucg-step-panel" data-step="2">
                 <div class="ucg-filter-toolbar">
                     <div class="ucg-filter-toolbar__meta">
                         <h2>Фильтры</h2>
@@ -204,34 +206,116 @@
             </section>
 
             <section class="ucg-step-panel" data-step="3">
-                <div class="ucg-template-block">
-                    <label class="ucg-field">
-                        <span>Шаблон</span>
-                        <select id="ucg-wizard-template" class="ucg-enhanced-select" data-search-enabled="false" data-placeholder="Не выбрано">
-                            <option value="">Не выбрано</option>
-                            <?php if (!empty($wizard_templates) && is_array($wizard_templates)) : ?>
-                                <?php foreach ($wizard_templates as $wizard_template_item) : ?>
-                                    <?php
-                                    $wizard_template_id = isset($wizard_template_item['id']) ? (int) $wizard_template_item['id'] : 0;
-                                    $wizard_template_name = isset($wizard_template_item['name']) ? (string) $wizard_template_item['name'] : '';
-                                    $wizard_template_post_type = isset($wizard_template_item['post_type']) ? (string) $wizard_template_item['post_type'] : '';
-                                    if ($wizard_template_id <= 0) {
-                                        continue;
-                                    }
-                                    ?>
-                                    <option value="<?php echo (int) $wizard_template_id; ?>" <?php selected($wizard_default_template_id, $wizard_template_id); ?>>
+
+                <!-- Card 1: Settings -->
+                <div class="ucg-card ucg-launch-settings">
+                    <div class="ucg-launch-settings-row">
+                        <label class="ucg-field">
+                            <span>Шаблон</span>
+                            <select id="ucg-wizard-template" class="ucg-enhanced-select" data-search-enabled="false" data-placeholder="Не выбрано">
+                                <option value="">Не выбрано</option>
+                                <?php if (!empty($wizard_templates) && is_array($wizard_templates)) : ?>
+                                    <?php foreach ($wizard_templates as $wizard_template_item) : ?>
                                         <?php
-                                        $wizard_template_label = '#' . $wizard_template_id . ' — ' . ($wizard_template_name !== '' ? $wizard_template_name : ('Шаблон #' . $wizard_template_id));
-                                        if ($wizard_template_post_type !== '') {
-                                            $wizard_template_label .= ' (' . $wizard_template_post_type . ')';
+                                        $wizard_template_id = isset($wizard_template_item['id']) ? (int) $wizard_template_item['id'] : 0;
+                                        $wizard_template_name = isset($wizard_template_item['name']) ? (string) $wizard_template_item['name'] : '';
+                                        $wizard_template_post_type = isset($wizard_template_item['post_type']) ? (string) $wizard_template_item['post_type'] : '';
+                                        if ($wizard_template_id <= 0) {
+                                            continue;
                                         }
-                                        echo esc_html($wizard_template_label);
                                         ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
-                        </select>
-                    </label>
+                                        <option value="<?php echo (int) $wizard_template_id; ?>" <?php selected($wizard_default_template_id, $wizard_template_id); ?>>
+                                            <?php
+                                            $wizard_template_label = '#' . $wizard_template_id . ' — ' . ($wizard_template_name !== '' ? $wizard_template_name : ('Шаблон #' . $wizard_template_id));
+                                            if ($wizard_template_post_type !== '') {
+                                                $wizard_template_label .= ' (' . $wizard_template_post_type . ')';
+                                            }
+                                            echo esc_html($wizard_template_label);
+                                            ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                            </select>
+                        </label>
+
+                        <div id="ucg-length-controls-wrap">
+                            <label class="ucg-field">
+                                <span>Длина текста</span>
+                                <select id="ucg-wizard-length-option" class="ucg-enhanced-select" data-search-enabled="false">
+                                    <?php if (!empty($text_length_options) && is_array($text_length_options)) : ?>
+                                        <?php foreach ($text_length_options as $length_option_item) : ?>
+                                            <?php
+                                            $length_option_id = isset($length_option_item['id']) ? (int) $length_option_item['id'] : 0;
+                                            $length_option_name = isset($length_option_item['name']) ? (string) $length_option_item['name'] : '';
+                                            $length_option_max_chars = isset($length_option_item['max_chars']) ? (int) $length_option_item['max_chars'] : 0;
+                                            $length_option_credits = isset($length_option_item['credits_cost']) ? (float) $length_option_item['credits_cost'] : 0.0;
+                                            $length_option_credits_label = rtrim(rtrim(number_format($length_option_credits, 2, '.', ''), '0'), '.');
+                                            if ($length_option_id <= 0 || $length_option_name === '') {
+                                                continue;
+                                            }
+                                            ?>
+                                            <option value="<?php echo (int) $length_option_id; ?>" <?php selected($default_length_option_id, $length_option_id); ?>>
+                                                <?php echo esc_html($length_option_name . ' — до ' . number_format_i18n($length_option_max_chars) . ' символов / ' . $length_option_credits_label . ' кр.'); ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    <?php else : ?>
+                                        <option value="">Нет доступных диапазонов</option>
+                                    <?php endif; ?>
+                                </select>
+                            </label>
+                        </div>
+
+                        <label class="ucg-field">
+                            <span>Модель</span>
+                            <select id="ucg-wizard-model" class="ucg-enhanced-select" data-search-enabled="false">
+                                <option value="auto">По умолчанию</option>
+                            </select>
+                        </label>
+
+                        <div class="ucg-advanced ucg-style-toggle-wrap">
+                            <button type="button" class="button ucg-style-btn" id="ucg-advanced-toggle" aria-expanded="false">
+                                <span class="dashicons dashicons-admin-settings" aria-hidden="true"></span> Стиль
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Style sub-row (toggleable) -->
+                    <div class="ucg-launch-style-row" id="ucg-advanced-body" hidden>
+                        <label class="ucg-field">
+                            <span>Язык</span>
+                            <select id="ucg-wizard-language" class="ucg-enhanced-select" data-search-enabled="false">
+                                <option value="auto">Авто</option>
+                                <option value="ru">Русский</option>
+                                <option value="en">English</option>
+                            </select>
+                        </label>
+                        <label class="ucg-field">
+                            <span>Тон</span>
+                            <select id="ucg-wizard-tone" class="ucg-enhanced-select" data-search-enabled="false">
+                                <option value="neutral">Нейтральный</option>
+                                <option value="official">Официальный</option>
+                                <option value="friendly">Дружелюбный</option>
+                            </select>
+                        </label>
+                        <label class="ucg-field">
+                            <span>Уникальность</span>
+                            <select id="ucg-wizard-uniqueness" class="ucg-enhanced-select" data-search-enabled="false">
+                                <option value="low">Низкая</option>
+                                <option value="medium">Средняя</option>
+                                <option value="high">Высокая</option>
+                            </select>
+                        </label>
+                        <div class="ucg-vary-length-field">
+                            <label class="ucg-checkbox">
+                                <input type="checkbox" id="ucg-wizard-vary-length">
+                                <span>Разброс длины</span>
+                            </label>
+                            <p class="ucg-muted ucg-field-hint" id="ucg-wizard-vary-length-hint"></p>
+                        </div>
+                    </div>
+
+                    <p class="ucg-muted ucg-field-hint" id="ucg-wizard-model-hint"></p>
+                    <p class="ucg-muted ucg-field-hint" id="ucg-wizard-unit-hint"></p>
 
                     <label class="ucg-field" id="ucg-template-name-wrap">
                         <span>Название шаблона</span>
@@ -240,177 +324,97 @@
 
                     <label class="ucg-checkbox">
                         <input type="checkbox" id="ucg-save-template-changes">
-                        <span id="ucg-save-template-label">Сохранить шаблон</span>
-                    </label>
-                </div>
-
-                <div class="ucg-grid-2 ucg-length-controls" id="ucg-length-controls-wrap">
-                    <label class="ucg-field">
-                        <span>Длина текста</span>
-                        <select id="ucg-wizard-length-option" class="ucg-enhanced-select" data-search-enabled="false">
-                            <?php if (!empty($text_length_options) && is_array($text_length_options)) : ?>
-                                <?php foreach ($text_length_options as $length_option_item) : ?>
-                                    <?php
-                                    $length_option_id = isset($length_option_item['id']) ? (int) $length_option_item['id'] : 0;
-                                    $length_option_name = isset($length_option_item['name']) ? (string) $length_option_item['name'] : '';
-                                    $length_option_max_chars = isset($length_option_item['max_chars']) ? (int) $length_option_item['max_chars'] : 0;
-                                    $length_option_credits = isset($length_option_item['credits_cost']) ? (float) $length_option_item['credits_cost'] : 0.0;
-                                    $length_option_credits_label = rtrim(rtrim(number_format($length_option_credits, 2, '.', ''), '0'), '.');
-                                    if ($length_option_id <= 0 || $length_option_name === '') {
-                                        continue;
-                                    }
-                                    ?>
-                                    <option value="<?php echo (int) $length_option_id; ?>" <?php selected($default_length_option_id, $length_option_id); ?>>
-                                        <?php echo esc_html($length_option_name . ' — до ' . number_format_i18n($length_option_max_chars) . ' символов / ' . $length_option_credits_label . ' кр.'); ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            <?php else : ?>
-                                <option value="">Нет доступных диапазонов</option>
-                            <?php endif; ?>
-                        </select>
+                        <span id="ucg-save-template-label">Сохранить как шаблон</span>
                     </label>
 
-                    <div class="ucg-vary-length-block">
-                        <label class="ucg-checkbox">
-                            <input type="checkbox" id="ucg-wizard-vary-length">
-                            <span>Варьировать длину текста</span>
-                        </label>
-                        <p class="ucg-muted ucg-field-hint" id="ucg-wizard-vary-length-hint"></p>
+                    <div class="ucg-seo-guidelines" id="ucg-seo-guidelines" hidden>
+                        <strong>Рекомендации для SEO-тегов</strong>
+                        <p class="ucg-muted">Title: до 60-70 символов, Description: до 140-160 символов. Ограничения лучше указывать в самих промптах.</p>
                     </div>
-                </div>
 
-                <div class="ucg-seo-guidelines" id="ucg-seo-guidelines" hidden>
-                    <strong>Рекомендации для SEO-тегов</strong>
-                    <p class="ucg-muted">Title: до 60-70 символов, Description: до 140-160 символов. Ограничения лучше указывать в самих промптах.</p>
-                </div>
-
-                <div class="ucg-grid-2 ucg-model-controls">
-                    <label class="ucg-field">
-                        <span>Модель</span>
-                        <select id="ucg-wizard-model" class="ucg-enhanced-select" data-search-enabled="false">
-                            <option value="auto">По умолчанию</option>
-                        </select>
-                        <p class="ucg-muted ucg-field-hint" id="ucg-wizard-model-hint"></p>
-                    </label>
-                    <div class="ucg-model-unit-hint-wrap">
-                        <p class="ucg-muted ucg-field-hint" id="ucg-wizard-unit-hint"></p>
-                    </div>
-                </div>
-
-                <div class="ucg-date-range-block" id="ucg-publish-date-range-wrap" hidden>
-                    <div class="ucg-grid-2 ucg-date-range-grid">
-                        <label class="ucg-field">
-                            <span>Дата публикации: от</span>
-                            <input type="date" id="ucg-wizard-publish-date-from">
-                        </label>
-                        <label class="ucg-field">
-                            <span>Дата публикации: до</span>
-                            <input type="date" id="ucg-wizard-publish-date-to">
-                        </label>
-                    </div>
-                    <p class="ucg-muted ucg-field-hint">Для комментариев и отзывов: если диапазон не задан, используется текущее время и дата.</p>
-                </div>
-
-                <div class="ucg-date-range-block" id="ucg-woo-rating-range-wrap" hidden>
-                    <div class="ucg-grid-2 ucg-date-range-grid">
-                        <label class="ucg-field">
-                            <span>Рейтинг: от</span>
-                            <select id="ucg-woo-rating-min" class="ucg-enhanced-select" data-search-enabled="false">
-                                <option value="1">1</option>
-                                <option value="2">2</option>
-                                <option value="3">3</option>
-                                <option value="4">4</option>
-                                <option value="5">5</option>
-                            </select>
-                        </label>
-                        <label class="ucg-field">
-                            <span>Рейтинг: до</span>
-                            <select id="ucg-woo-rating-max" class="ucg-enhanced-select" data-search-enabled="false">
-                                <option value="1">1</option>
-                                <option value="2">2</option>
-                                <option value="3">3</option>
-                                <option value="4">4</option>
-                                <option value="5" selected>5</option>
-                            </select>
-                        </label>
-                    </div>
-                    <p class="ucg-muted ucg-field-hint">Для WooCommerce отзывов: модель будет генерировать рейтинг в выбранном диапазоне.</p>
-                </div>
-
-                <div class="ucg-date-range-block ucg-advanced" id="ucg-style-controls-wrap">
-                    <button type="button" class="ucg-advanced__toggle" id="ucg-advanced-toggle" aria-expanded="false">
-                        <span>Дополнительно</span>
-                        <span class="ucg-advanced__chevron" aria-hidden="true"></span>
-                    </button>
-                    <div class="ucg-advanced__body" id="ucg-advanced-body" hidden>
-                        <strong>Стиль генерации</strong>
-                        <div class="ucg-grid-3" style="margin-top:8px;">
+                    <div class="ucg-date-range-block" id="ucg-publish-date-range-wrap" hidden>
+                        <div class="ucg-grid-2 ucg-date-range-grid">
                             <label class="ucg-field">
-                                <span>Язык</span>
-                                <select id="ucg-wizard-language" class="ucg-enhanced-select" data-search-enabled="false">
-                                    <option value="auto">Авто</option>
-                                    <option value="ru">Русский</option>
-                                    <option value="en">English</option>
+                                <span>Дата публикации: от</span>
+                                <input type="date" id="ucg-wizard-publish-date-from">
+                            </label>
+                            <label class="ucg-field">
+                                <span>Дата публикации: до</span>
+                                <input type="date" id="ucg-wizard-publish-date-to">
+                            </label>
+                        </div>
+                        <p class="ucg-muted ucg-field-hint">Для комментариев и отзывов: если диапазон не задан, используется текущее время и дата.</p>
+                    </div>
+
+                    <div class="ucg-date-range-block" id="ucg-woo-rating-range-wrap" hidden>
+                        <div class="ucg-grid-2 ucg-date-range-grid">
+                            <label class="ucg-field">
+                                <span>Рейтинг: от</span>
+                                <select id="ucg-woo-rating-min" class="ucg-enhanced-select" data-search-enabled="false">
+                                    <option value="1">1</option>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                    <option value="4">4</option>
+                                    <option value="5">5</option>
                                 </select>
                             </label>
                             <label class="ucg-field">
-                                <span>Тон</span>
-                                <select id="ucg-wizard-tone" class="ucg-enhanced-select" data-search-enabled="false">
-                                    <option value="neutral">Нейтральный</option>
-                                    <option value="official">Официальный</option>
-                                    <option value="friendly">Дружелюбный</option>
-                                </select>
-                            </label>
-                            <label class="ucg-field">
-                                <span>Уникальность</span>
-                                <select id="ucg-wizard-uniqueness" class="ucg-enhanced-select" data-search-enabled="false">
-                                    <option value="low">Низкая</option>
-                                    <option value="medium">Средняя</option>
-                                    <option value="high">Высокая</option>
+                                <span>Рейтинг: до</span>
+                                <select id="ucg-woo-rating-max" class="ucg-enhanced-select" data-search-enabled="false">
+                                    <option value="1">1</option>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                    <option value="4">4</option>
+                                    <option value="5" selected>5</option>
                                 </select>
                             </label>
                         </div>
-                        <p class="ucg-muted ucg-field-hint">По умолчанию берём значения из настроек. Можно изменить для конкретного запуска.</p>
+                        <p class="ucg-muted ucg-field-hint">Для WooCommerce отзывов: модель будет генерировать рейтинг в выбранном диапазоне.</p>
                     </div>
                 </div>
 
-                <div id="ucg-template-body-standard-wrap">
-                    <label class="ucg-field">
-                        <span>Текст шаблона</span>
+                <!-- Card 2: Prompt -->
+                <div class="ucg-card ucg-launch-prompt">
+                    <div class="ucg-launch-prompt-head">
+                        <span class="ucg-launch-prompt-label">Текст промпта</span>
+                        <span class="ucg-muted">Используйте {переменные} для подстановки данных записи</span>
+                    </div>
+
+                    <div id="ucg-template-body-standard-wrap">
                         <textarea id="ucg-wizard-template-body" class="ucg-wizard-template-input" rows="12"></textarea>
-                    </label>
-                </div>
-
-                <div id="ucg-template-body-seo-wrap" hidden>
-                    <div class="ucg-grid-2">
-                        <label class="ucg-field">
-                            <span>Шаблон для SEO title</span>
-                            <textarea id="ucg-wizard-template-body-seo-title" class="ucg-wizard-template-input" rows="8" placeholder="Например: Сгенерируй только SEO title до 60 символов"></textarea>
-                        </label>
-                        <label class="ucg-field">
-                            <span>Шаблон для SEO description</span>
-                            <textarea id="ucg-wizard-template-body-seo-description" class="ucg-wizard-template-input" rows="8" placeholder="Например: Сгенерируй meta description 140-160 символов"></textarea>
-                        </label>
                     </div>
-                </div>
 
-                <div class="ucg-token-panel">
-                    <div class="ucg-token-panel__head">
-                        <div class="ucg-token-panel__heading">
-                            <h3>Переменные</h3>
-                            <span>Кликните или перетащите переменную в текст</span>
+                    <div id="ucg-template-body-seo-wrap" hidden>
+                        <div class="ucg-grid-2">
+                            <label class="ucg-field">
+                                <span>Шаблон для SEO title</span>
+                                <textarea id="ucg-wizard-template-body-seo-title" class="ucg-wizard-template-input" rows="8" placeholder="Например: Сгенерируй только SEO title до 60 символов"></textarea>
+                            </label>
+                            <label class="ucg-field">
+                                <span>Шаблон для SEO description</span>
+                                <textarea id="ucg-wizard-template-body-seo-description" class="ucg-wizard-template-input" rows="8" placeholder="Например: Сгенерируй meta description 140-160 символов"></textarea>
+                            </label>
                         </div>
-                        <label class="ucg-token-search">
-                            <input type="search" id="ucg-wizard-token-search" placeholder="Поиск переменной">
-                        </label>
                     </div>
-                    <div class="ucg-token-groups" id="ucg-wizard-tokens"></div>
+
+                    <div class="ucg-token-panel">
+                        <div class="ucg-token-panel__head">
+                            <div class="ucg-token-panel__heading">
+                                <h3>Переменные</h3>
+                                <span>Кликните или перетащите переменную в текст</span>
+                            </div>
+                            <label class="ucg-token-search">
+                                <input type="search" id="ucg-wizard-token-search" placeholder="Поиск переменной">
+                            </label>
+                        </div>
+                        <div class="ucg-token-groups" id="ucg-wizard-tokens"></div>
+                    </div>
                 </div>
 
                 <div id="ucg-run-result" class="ucg-api-status" aria-live="polite"></div>
                 <div id="ucg-run-summary" class="ucg-run-summary" aria-live="polite"></div>
 
-                <div class="ucg-card" id="ucg-example-wrap" style="margin-top:12px; display:none;">
+                <div class="ucg-card" id="ucg-example-wrap" style="margin-top:0; display:none;">
                     <div class="ucg-actions-row" style="justify-content: space-between; align-items: center;">
                         <strong>Пример результата</strong>
                         <span class="ucg-muted" id="ucg-example-credits"></span>

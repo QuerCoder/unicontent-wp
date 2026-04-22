@@ -1558,19 +1558,17 @@ if (!class_exists('UCG_Admin')) {
 
             $run_seed = function_exists('wp_generate_uuid4') ? wp_generate_uuid4() : (string) wp_rand(100000, 999999) . '-' . time();
             $generator = new UCG_Generator();
-            $system_prompt = method_exists($generator, 'build_effective_system_prompt')
-                ? $generator->build_effective_system_prompt(
-                    $base_system_prompt,
-                    $scenario,
-                    $style_language,
-                    $style_tone,
-                    $style_uniqueness,
-                    $run_seed,
-                    1,
-                    $post_id,
-                    1
-                )
-                : $base_system_prompt;
+            $system_prompt = $generator->build_effective_system_prompt_for_preview(
+                $base_system_prompt,
+                $scenario,
+                $style_language,
+                $style_tone,
+                $style_uniqueness,
+                $run_seed,
+                1,
+                $post_id,
+                1
+            );
 
             $api_client = new UCG_Api_Client();
 
@@ -1578,8 +1576,8 @@ if (!class_exists('UCG_Admin')) {
                 $seo_title_prompt = UCG_Tokens::render_prompt_for_post($template_body_seo_title, $post_id);
                 $seo_description_prompt = UCG_Tokens::render_prompt_for_post($template_body_seo_description, $post_id);
 
-                $seo_title_prompt = $generator->build_prompt_for_single_seo_field($seo_title_prompt, 'title');
-                $seo_description_prompt = $generator->build_prompt_for_single_seo_field($seo_description_prompt, 'description');
+                $seo_title_prompt = $generator->build_prompt_for_single_seo_field_for_preview($seo_title_prompt, 'title');
+                $seo_description_prompt = $generator->build_prompt_for_single_seo_field_for_preview($seo_description_prompt, 'description');
 
                 $r1 = $api_client->generate_text($seo_title_prompt, $system_prompt, $max_tokens, $length_option_id, $vary_length, $model);
                 if (is_wp_error($r1)) {
@@ -1622,7 +1620,7 @@ if (!class_exists('UCG_Admin')) {
                 }
             }
 
-            $prompt = $generator->build_prompt_for_comment_and_review_scenarios($prompt, $scenario, $rating_min, $rating_max);
+            $prompt = $generator->build_prompt_for_comment_and_review_scenarios_for_preview($prompt, $scenario, $rating_min, $rating_max);
 
             $resp = $api_client->generate_text($prompt, $system_prompt, $max_tokens, $length_option_id, $vary_length, $model);
             if (is_wp_error($resp)) {

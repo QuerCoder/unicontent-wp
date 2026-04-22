@@ -212,6 +212,7 @@ body.ucg-review-modal-open {
 .ucg-field {
     display: grid;
     gap: 8px;
+    align-content: start;
 }
 
 .ucg-field > span {
@@ -1063,17 +1064,25 @@ body.ucg-review-modal-open {
 }
 
 .ucg-wizard .ucg-stepper {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 16px;
+}
+
+.ucg-stepper__sep {
+    color: var(--ucg-border-strong);
+    padding: 0 2px;
+    user-select: none;
+    font-weight: 300;
+    opacity: 0.5;
 }
 
 .ucg-stepper__item {
-    border: 1px solid var(--ucg-border);
-    background: #fff;
-    border-radius: 12px;
-    padding: 10px;
+    border: none;
+    background: none;
+    border-radius: 0;
+    padding: 8px 12px;
     text-align: left;
     display: flex;
     align-items: center;
@@ -1098,14 +1107,26 @@ body.ucg-review-modal-open {
 }
 
 .ucg-stepper__item.is-active {
-    border-color: rgba(240, 106, 54, 0.38);
-    background: linear-gradient(160deg, #fff, #fff4ec);
+    border-color: transparent;
+    background: none;
 }
 
 .ucg-stepper__item.is-active .ucg-stepper__num {
     border-color: rgba(240, 106, 54, 0.42);
     color: var(--ucg-accent-strong);
     background: rgba(240, 106, 54, 0.08);
+}
+
+.ucg-stepper__item.is-done .ucg-stepper__num {
+    border-color: var(--ucg-success);
+    color: var(--ucg-success);
+    background: rgba(20, 128, 94, 0.08);
+    font-size: 0;
+}
+
+.ucg-stepper__item.is-done .ucg-stepper__num::before {
+    content: '✓';
+    font-size: 12px;
 }
 
 .ucg-step-panel {
@@ -1139,6 +1160,77 @@ body.ucg-review-modal-open {
 
 .ucg-step-footer--end .button {
     flex: 0 1 240px;
+}
+
+/* Step 3 two-card layout */
+.ucg-launch-settings-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr auto;
+    gap: 12px;
+    align-items: end;
+}
+
+.ucg-launch-settings-row #ucg-length-controls-wrap {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+}
+
+.ucg-launch-settings-row #ucg-length-controls-wrap .ucg-field {
+    flex: 1;
+}
+
+.ucg-style-toggle-wrap {
+    align-self: end;
+    padding-bottom: 2px;
+}
+
+.ucg-style-btn {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+
+.ucg-style-btn .dashicons {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+    margin-top: 1px;
+}
+
+.ucg-launch-style-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--ucg-border);
+    margin-top: 4px;
+}
+
+.ucg-vary-length-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.ucg-launch-prompt {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.ucg-launch-prompt-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.ucg-launch-prompt-label {
+    font-weight: 600;
+    font-size: 13px;
+    flex-shrink: 0;
 }
 
 .ucg-template-block {
@@ -1645,7 +1737,7 @@ body.ucg-review-modal-open {
     border: 1px solid var(--ucg-border);
     background: #fffdf9;
     box-shadow: none;
-    padding: 9px 12px;
+    padding: 10px 12px;
     transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
 }
 
@@ -1829,7 +1921,20 @@ body.ucg-review-modal-open {
     }
 
     .ucg-wizard .ucg-stepper {
-        grid-template-columns: 1fr;
+        flex-wrap: wrap;
+        gap: 0;
+    }
+
+    .ucg-stepper__sep {
+        display: none;
+    }
+
+    .ucg-launch-settings-row {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .ucg-launch-style-row {
+        grid-template-columns: 1fr 1fr;
     }
 
     .ucg-filter-row-item {
