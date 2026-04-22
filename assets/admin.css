@@ -631,10 +631,32 @@ body.ucg-review-modal-open {
     margin: 0;
 }
 
+.ucg-wizard-template-input {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 220px;
+    border: 1px solid var(--ucg-border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 13px;
+    line-height: 1.6;
+    resize: vertical;
+    background: #fff;
+    color: var(--ucg-text-primary);
+    font-family: inherit;
+    transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.ucg-wizard-template-input:focus {
+    border-color: rgba(240, 106, 54, 0.56);
+    box-shadow: 0 0 0 3px rgba(240, 106, 54, 0.12);
+    outline: none;
+}
+
 .ucg-token-panel {
-    margin-top: 16px;
+    margin-top: 12px;
     border-top: 1px solid var(--ucg-border);
-    padding-top: 14px;
+    padding-top: 12px;
 }
 
 .ucg-token-panel__head {
@@ -653,10 +675,15 @@ body.ucg-review-modal-open {
 
 .ucg-token-panel__head h3 {
     margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ucg-text-secondary);
 }
 
 .ucg-token-panel__head span {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--ucg-text-muted);
 }
 
@@ -681,25 +708,29 @@ body.ucg-review-modal-open {
 
 .ucg-token-groups {
     display: grid;
-    gap: 8px;
+    gap: 10px;
 }
 
 .ucg-token-group {
-    border: 1px solid var(--ucg-border);
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.74);
-    padding: 0 10px;
+    border: none;
+    border-radius: 0;
+    background: none;
+    padding: 0;
 }
 
 .ucg-token-group summary {
     cursor: pointer;
     list-style: none;
-    min-height: 40px;
+    min-height: 24px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+    gap: 6px;
     font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ucg-text-secondary);
+    margin-bottom: 6px;
 }
 
 .ucg-token-group summary::-webkit-details-marker {
@@ -710,36 +741,36 @@ body.ucg-review-modal-open {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 28px;
-    height: 22px;
+    min-width: 20px;
+    height: 16px;
     border-radius: 999px;
     background: rgba(240, 106, 54, 0.14);
     color: var(--ucg-accent-strong);
-    font-size: 12px;
+    font-size: 10px;
     font-weight: 700;
 }
 
 .ucg-token-grid {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
-    padding: 0 0 10px;
+    gap: 5px;
+    padding: 0;
 }
 
 .ucg-token-btn {
     display: inline-flex;
     align-items: center;
-    max-width: 320px;
-    border: 1px solid rgba(240, 106, 54, 0.25);
+    max-width: 260px;
+    border: 1px solid rgba(240, 106, 54, 0.22);
     border-radius: 999px;
-    padding: 6px 11px;
+    padding: 3px 8px;
     background: var(--ucg-accent-soft);
     color: var(--ucg-accent-strong);
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1.2;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     cursor: pointer;
-    transition: background-color .18s ease, transform .18s ease;
+    transition: background-color .15s ease;
 }
 
 .ucg-token-btn__text {
@@ -753,7 +784,7 @@ body.ucg-review-modal-open {
 }
 
 .ucg-token-btn:active {
-    transform: translateY(0);
+    opacity: 0.8;
 }
 
 .ucg-checkbox {
@@ -1204,8 +1235,8 @@ body.ucg-review-modal-open {
     grid-template-columns: repeat(4, 1fr);
     gap: 12px;
     padding-top: 12px;
+    padding-bottom: 2px;
     border-top: 1px solid var(--ucg-border);
-    margin-top: 4px;
 }
 
 .ucg-vary-length-field {

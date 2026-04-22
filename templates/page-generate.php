@@ -314,10 +314,10 @@
                         </div>
                     </div>
 
-                    <p class="ucg-muted ucg-field-hint" id="ucg-wizard-model-hint"></p>
-                    <p class="ucg-muted ucg-field-hint" id="ucg-wizard-unit-hint"></p>
+                    <span id="ucg-wizard-model-hint" hidden></span>
+                    <span id="ucg-wizard-unit-hint" hidden></span>
 
-                    <label class="ucg-field" id="ucg-template-name-wrap">
+                    <label class="ucg-field" id="ucg-template-name-wrap" hidden>
                         <span>Название шаблона</span>
                         <input type="text" id="ucg-wizard-template-name" placeholder="Например: SEO описание товара">
                     </label>
