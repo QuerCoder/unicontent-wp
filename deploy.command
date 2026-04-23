@@ -31,7 +31,10 @@ ZIP_PATH="/tmp/unicontent-ai-generator-$VERSION.zip"
 rm -f "$ZIP_PATH"
 rm -rf "/tmp/unicontent-ai-generator"
 cp -r . "/tmp/unicontent-ai-generator"
-rm -rf "/tmp/unicontent-ai-generator/.git" "/tmp/unicontent-ai-generator/deploy.command" "/tmp/unicontent-ai-generator/.DS_Store"
+rm -rf "/tmp/unicontent-ai-generator/.git" "/tmp/unicontent-ai-generator/deploy.command" \
+        "/tmp/unicontent-ai-generator/.DS_Store" "/tmp/unicontent-ai-generator/.wp-env.json" \
+        "/tmp/unicontent-ai-generator/.wp-env" "/tmp/unicontent-ai-generator/.gitignore" \
+        "/tmp/unicontent-ai-generator/docker-compose.local.yml"
 (cd /tmp && zip -r "$ZIP_PATH" "unicontent-ai-generator" --exclude "*.DS_Store" > /dev/null)
 rm -rf "/tmp/unicontent-ai-generator"
 

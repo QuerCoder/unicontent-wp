@@ -39,14 +39,114 @@ jQuery(function ($) {
         el.setSelectionRange(pos, pos);
     }
 
+    function setInlineStatusBarState($bar, percent, durationMs) {
+        if (!$bar || !$bar.length) {
+            return;
+        }
+        const clamped = Math.max(0, Math.min(100, Number(percent || 0)));
+        $bar.css({ transition: 'none', width: clamped + '%' });
+        if (durationMs > 0) {
+            void $bar.get(0).offsetWidth;
+            $bar.css({ transition: 'width ' + durationMs + 'ms linear', width: '0%' });
+        }
+    }
+
+    function setInlineStatusMessage($container, message, isError, ttlMs) {
+        if (!$container || !$container.length) {
+            return;
+        }
+
+        const text = String(message || '').trim();
+        if (!text) {
+            const prevTimer = Number($container.data('ucgStatusTimer') || 0);
+            if (prevTimer) {
+                window.clearTimeout(prevTimer);
+            }
+            $container.removeData('ucgStatusTimer');
+            $container.empty();
+            return;
+        }
+
+        const ttl = Number.isFinite(Number(ttlMs)) ? Math.max(0, Number(ttlMs)) : 5000;
+        const cls = isError ? 'ucg-status-message ucg-status-message--error' : 'ucg-status-message ucg-status-message--ok';
+        const role = isError ? 'alert' : 'status';
+        const progressHidden = ttl <= 0 ? ' hidden' : '';
+        const html = '' +
+            '<div class="' + cls + '" role="' + role + '">' +
+            '<span class="ucg-status-message__text">' + escapeHtml(text) + '</span>' +
+            '<span class="ucg-status-message__progress"' + progressHidden + '><span class="ucg-status-message__bar"></span></span>' +
+            '</div>';
+        $container.html(html);
+
+        const prevTimer = Number($container.data('ucgStatusTimer') || 0);
+        if (prevTimer) {
+            window.clearTimeout(prevTimer);
+        }
+
+        const $message = $container.children('.ucg-status-message').first();
+        const $bar = $message.find('.ucg-status-message__bar');
+
+        if (ttl > 0) {
+            setInlineStatusBarState($bar, 100, ttl);
+            const timeoutId = window.setTimeout(function () {
+                if (!$message.length || !$message.closest(document.documentElement).length) {
+                    return;
+                }
+                $message.addClass('is-leaving');
+                window.setTimeout(function () {
+                    if ($message.closest(document.documentElement).length) {
+                        $container.empty();
+                    }
+                }, 150);
+            }, ttl);
+            $container.data('ucgStatusTimer', timeoutId);
+            return;
+        }
+
+        $container.removeData('ucgStatusTimer');
+    }
+
+    function initTimedStatusMessages() {
+        $('.ucg-status-message').each(function () {
+            const $message = $(this);
+            if (!$message.length || $message.find('.ucg-status-message__progress').length) {
+                return;
+            }
+
+            const text = String($message.text() || '').trim();
+            if (!text) {
+                return;
+            }
+
+            $message.html(
+                '<span class="ucg-status-message__text">' + escapeHtml(text) + '</span>' +
+                '<span class="ucg-status-message__progress"><span class="ucg-status-message__bar"></span></span>'
+            );
+
+            const $bar = $message.find('.ucg-status-message__bar');
+            setInlineStatusBarState($bar, 100, 5000);
+
+            const timeoutId = window.setTimeout(function () {
+                if (!$message.closest(document.documentElement).length) {
+                    return;
+                }
+                $message.addClass('is-leaving');
+                window.setTimeout(function () {
+                    if ($message.closest(document.documentElement).length) {
+                        $message.remove();
+                    }
+                }, 150);
+            }, 5000);
+            $message.data('ucgStatusTimer', timeoutId);
+        });
+    }
+
     function setApiStatus(message, isError) {
         const $status = $('#ucg-api-status');
         if (!$status.length) {
             return;
         }
-
-        const cls = isError ? 'ucg-status-message ucg-status-message--error' : 'ucg-status-message ucg-status-message--ok';
-        $status.html('<div class="' + cls + '">' + escapeHtml(message) + '</div>');
+        setInlineStatusMessage($status, message, !!isError, 5000);
     }
 
     function jsT(text) {
@@ -70,6 +170,19 @@ jQuery(function ($) {
             minimumFractionDigits: 0,
             maximumFractionDigits: decimals
         }).replace(',', '.');
+    }
+
+    function pluralRu(value, forms) {
+        const num = Math.abs(Math.trunc(Number(value) || 0));
+        const mod10 = num % 10;
+        const mod100 = num % 100;
+        if (mod10 === 1 && mod100 !== 11) {
+            return forms[0];
+        }
+        if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+            return forms[1];
+        }
+        return forms[2];
     }
 
     function setBalanceValue(credits) {
@@ -483,6 +596,10 @@ jQuery(function ($) {
             if (placeholder) {
                 config.placeholder = placeholder;
             }
+
+            config.onChange = function () {
+                $select.trigger('change');
+            };
 
             new window.TomSelect(element, config);
         });
@@ -1149,10 +1266,9 @@ jQuery(function ($) {
         const $lengthControlsWrap = $('#ucg-length-controls-wrap');
         const $seoGuidelines = $('#ucg-seo-guidelines');
         const $modelSelect = $('#ucg-wizard-model');
-        const $modelHint = $('#ucg-wizard-model-hint');
-        const $unitHint = $('#ucg-wizard-unit-hint');
         const $varyLength = $('#ucg-wizard-vary-length');
         const $varyLengthHint = $('#ucg-wizard-vary-length-hint');
+        const $varyLengthHelp = $('#ucg-wizard-vary-length-help');
         const $templateBodyStandardWrap = $('#ucg-template-body-standard-wrap');
         const $templateBodySeoWrap = $('#ucg-template-body-seo-wrap');
         const $templateBody = $('#ucg-wizard-template-body');
@@ -1172,10 +1288,15 @@ jQuery(function ($) {
         const $filterRows = $('#ucg-filter-rows');
         const $previewBody = $('#ucg-preview-tbody');
         const $previewSummary = $('#ucg-preview-summary');
+        const $previewFoundCount = $('#ucg-preview-found-count');
+        const $previewSelectedCount = $('#ucg-preview-selected-count');
+        const $selectionModeFilteredTotal = $('#ucg-selection-mode-filtered-total');
         const $previewPagination = $('#ucg-preview-pagination');
         const $selectedCount = $('#ucg-selected-count');
         const $runResult = $('#ucg-run-result');
         const $runSummary = $('#ucg-run-summary');
+        const $step3Total = $('#ucg-step-3-total');
+        const $toastStack = $('#ucg-toast-stack');
         const $exampleWrap = $('#ucg-example-wrap');
         const $exampleOutput = $('#ucg-example-output');
         const $exampleCredits = $('#ucg-example-credits');
@@ -1189,6 +1310,12 @@ jQuery(function ($) {
         const $selectionMode = $('input[name="ucg-selection-mode"]');
         const $saveTemplateChanges = $('#ucg-save-template-changes');
         let $activeTemplateTextarea = $templateBody;
+        let lastToastSignature = '';
+        let lastToastAt = 0;
+        let toastSeq = 0;
+        let toastTimersPaused = false;
+        const toastById = new Map();
+        const toastByKey = new Map();
 
         function setScenarioCardState() {
             if (!$scenarioCards.length) {
@@ -1377,12 +1504,317 @@ jQuery(function ($) {
             toggleWooRatingRangeControls(scenario);
         }
 
-        function setRunStatus(message, isError) {
-            if (!$runResult.length) {
+        function applyStyleDefaultsFromSchema() {
+            const settings = state.schema && state.schema.settings ? state.schema.settings : {};
+            const langRaw = settings && settings.default_language ? String(settings.default_language) : 'auto';
+            const toneRaw = settings && settings.default_tone ? String(settings.default_tone) : 'neutral';
+            const uniquenessRaw = settings && settings.default_uniqueness ? String(settings.default_uniqueness) : 'medium';
+            const language = (langRaw === 'auto' || langRaw === 'ru' || langRaw === 'en') ? langRaw : 'auto';
+            const tone = (toneRaw === 'neutral' || toneRaw === 'official' || toneRaw === 'friendly') ? toneRaw : 'neutral';
+            const uniqueness = (uniquenessRaw === 'low' || uniquenessRaw === 'medium' || uniquenessRaw === 'high') ? uniquenessRaw : 'medium';
+
+            if ($styleLanguage.length) {
+                setEnhancedSelectValue($styleLanguage, language);
+            }
+            if ($styleTone.length) {
+                setEnhancedSelectValue($styleTone, tone);
+            }
+            if ($styleUniqueness.length) {
+                setEnhancedSelectValue($styleUniqueness, uniqueness);
+            }
+        }
+
+        function normalizeToastType(type) {
+            const normalized = String(type || '').toLowerCase();
+            if (normalized === 'success' || normalized === 'error' || normalized === 'warning' || normalized === 'loading') {
+                return normalized;
+            }
+            return 'info';
+        }
+
+        function defaultToastTtl(type) {
+            return 5000;
+        }
+
+        function toastIcon(type) {
+            const normalized = normalizeToastType(type);
+            if (normalized === 'success') {
+                return '✓';
+            }
+            if (normalized === 'error') {
+                return '✕';
+            }
+            if (normalized === 'warning') {
+                return '⚠';
+            }
+            if (normalized === 'loading') {
+                return '⟳';
+            }
+            return 'ℹ';
+        }
+
+        function setToastBarState($bar, percent, durationMs) {
+            if (!$bar || !$bar.length) {
                 return;
             }
-            const cls = isError ? 'ucg-status-message ucg-status-message--error' : 'ucg-status-message ucg-status-message--ok';
-            $runResult.html('<div class="' + cls + '">' + escapeHtml(message) + '</div>');
+            const clamped = Math.max(0, Math.min(100, Number(percent || 0)));
+            $bar.css({ transition: 'none', width: clamped + '%' });
+            if (durationMs > 0) {
+                void $bar.get(0).offsetWidth;
+                $bar.css({ transition: 'width ' + durationMs + 'ms linear', width: '0%' });
+            }
+        }
+
+        function applyToastView(item) {
+            if (!item || !item.$el || !item.$el.length) {
+                return;
+            }
+            const $el = item.$el;
+            const typeClass = 'ucg-toast--' + item.type;
+            $el
+                .removeClass('ucg-toast--success ucg-toast--error ucg-toast--warning ucg-toast--info ucg-toast--loading ucg-toast--persistent is-leaving')
+                .addClass(typeClass)
+                .attr('role', item.type === 'error' ? 'alert' : 'status');
+            if (item.ttl <= 0) {
+                $el.addClass('ucg-toast--persistent');
+            }
+            $el.find('.ucg-toast__icon-glyph').text(toastIcon(item.type));
+            $el.find('.ucg-toast__title').text(item.message);
+            const $detail = $el.find('.ucg-toast__detail');
+            if (item.detail) {
+                $detail.text(item.detail).prop('hidden', false);
+            } else {
+                $detail.text('').prop('hidden', true);
+            }
+            $el.find('.ucg-toast__progress').prop('hidden', item.ttl <= 0);
+        }
+
+        function removeToastItem(item) {
+            if (!item) {
+                return;
+            }
+            if (item.timeoutId) {
+                window.clearTimeout(item.timeoutId);
+                item.timeoutId = 0;
+            }
+            if (item.key) {
+                toastByKey.delete(item.key);
+            }
+            toastById.delete(item.id);
+            if (item.$el && item.$el.length) {
+                item.$el.remove();
+            }
+        }
+
+        function closeToastById(id, immediate) {
+            const key = String(id || '');
+            if (!key || !toastById.has(key)) {
+                return;
+            }
+            const item = toastById.get(key);
+            if (!item) {
+                return;
+            }
+            if (item.timeoutId) {
+                window.clearTimeout(item.timeoutId);
+                item.timeoutId = 0;
+            }
+            if (immediate) {
+                removeToastItem(item);
+                return;
+            }
+            if (!item.$el || !item.$el.length || item.$el.hasClass('is-leaving')) {
+                return;
+            }
+            item.$el.addClass('is-leaving');
+            window.setTimeout(function () {
+                removeToastItem(item);
+            }, 150);
+        }
+
+        function startToastTimer(item) {
+            if (!item || item.ttl <= 0 || !item.$bar || !item.$bar.length) {
+                return;
+            }
+            if (item.timeoutId) {
+                window.clearTimeout(item.timeoutId);
+                item.timeoutId = 0;
+            }
+            if (item.remainingMs <= 0) {
+                closeToastById(item.id, false);
+                return;
+            }
+            const percent = item.ttl > 0 ? ((item.remainingMs / item.ttl) * 100) : 0;
+            if (toastTimersPaused) {
+                setToastBarState(item.$bar, percent, 0);
+                return;
+            }
+            item.timerStartedAt = Date.now();
+            item.timeoutId = window.setTimeout(function () {
+                closeToastById(item.id, false);
+            }, item.remainingMs);
+            setToastBarState(item.$bar, percent, item.remainingMs);
+        }
+
+        function pauseToastTimers() {
+            if (toastTimersPaused) {
+                return;
+            }
+            toastTimersPaused = true;
+            toastById.forEach(function (item) {
+                if (!item || item.ttl <= 0 || !item.timeoutId) {
+                    return;
+                }
+                const elapsed = Date.now() - Number(item.timerStartedAt || 0);
+                item.remainingMs = Math.max(0, item.remainingMs - Math.max(0, elapsed));
+                window.clearTimeout(item.timeoutId);
+                item.timeoutId = 0;
+                const percent = item.ttl > 0 ? ((item.remainingMs / item.ttl) * 100) : 0;
+                setToastBarState(item.$bar, percent, 0);
+            });
+        }
+
+        function resumeToastTimers() {
+            if (!toastTimersPaused) {
+                return;
+            }
+            toastTimersPaused = false;
+            toastById.forEach(function (item) {
+                startToastTimer(item);
+            });
+        }
+
+        function trimToastStack(preserveId) {
+            const keepId = String(preserveId || '');
+            while (toastById.size > 3) {
+                let candidateId = '';
+                $toastStack.children('.ucg-toast').each(function () {
+                    if (candidateId) {
+                        return;
+                    }
+                    const currentId = String($(this).attr('data-toast-id') || '');
+                    if (!currentId || currentId === keepId) {
+                        return;
+                    }
+                    candidateId = currentId;
+                });
+                if (!candidateId) {
+                    break;
+                }
+                closeToastById(candidateId, true);
+            }
+        }
+
+        function showRunToast(options) {
+            if (!$toastStack.length) {
+                return null;
+            }
+
+            const opts = options && typeof options === 'object' ? options : {};
+            const message = String(opts.message || '').trim();
+            const detail = String(opts.detail || '').trim();
+            if (!message) {
+                return null;
+            }
+
+            const type = normalizeToastType(opts.type || 'info');
+            const key = opts.key ? String(opts.key) : '';
+            const now = Date.now();
+            const signature = type + ':' + message + '|' + detail + (key ? ('|' + key) : '');
+            if (!opts.force && !key && signature === lastToastSignature && (now - lastToastAt) < 1200) {
+                return null;
+            }
+            lastToastSignature = signature;
+            lastToastAt = now;
+
+            const ttl = typeof opts.ttl === 'number' ? Math.max(0, Number(opts.ttl)) : defaultToastTtl(type);
+            const baseItem = {
+                type: type,
+                message: message,
+                detail: detail,
+                ttl: ttl,
+                remainingMs: ttl,
+                timerStartedAt: 0
+            };
+
+            if (key && toastByKey.has(key)) {
+                const existing = toastByKey.get(key);
+                if (existing) {
+                    if (existing.timeoutId) {
+                        window.clearTimeout(existing.timeoutId);
+                        existing.timeoutId = 0;
+                    }
+                    existing.type = baseItem.type;
+                    existing.message = baseItem.message;
+                    existing.detail = baseItem.detail;
+                    existing.ttl = baseItem.ttl;
+                    existing.remainingMs = baseItem.remainingMs;
+                    existing.timerStartedAt = 0;
+                    applyToastView(existing);
+                    startToastTimer(existing);
+                    return existing;
+                }
+            }
+
+            const id = String(++toastSeq);
+            const closeLabel = escapeHtml(jsT('Закрыть уведомление'));
+            const $toast = $(
+                '<article class="ucg-toast" data-toast-id="' + id + '" role="status">' +
+                '<div class="ucg-toast__icon" aria-hidden="true"><span class="ucg-toast__icon-glyph"></span></div>' +
+                '<div class="ucg-toast__body"><div class="ucg-toast__title"></div><div class="ucg-toast__detail" hidden></div></div>' +
+                '<button type="button" class="ucg-toast__close" aria-label="' + closeLabel + '"><span aria-hidden="true">×</span></button>' +
+                '<div class="ucg-toast__progress"><span class="ucg-toast__bar"></span></div>' +
+                '</article>'
+            );
+            $toastStack.append($toast);
+
+            const item = {
+                id: id,
+                key: key,
+                type: baseItem.type,
+                message: baseItem.message,
+                detail: baseItem.detail,
+                ttl: baseItem.ttl,
+                remainingMs: baseItem.remainingMs,
+                timerStartedAt: 0,
+                timeoutId: 0,
+                $el: $toast,
+                $bar: $toast.find('.ucg-toast__bar')
+            };
+            toastById.set(id, item);
+            if (key) {
+                toastByKey.set(key, item);
+            }
+            applyToastView(item);
+            trimToastStack(id);
+            startToastTimer(item);
+            return item;
+        }
+
+        function setRunStatus(message, isError, toastOptions) {
+            const text = String(message || '').trim();
+            if ($runResult.length) {
+                $runResult.text(text);
+            }
+            if (!text) {
+                return;
+            }
+            const options = toastOptions && typeof toastOptions === 'object' ? toastOptions : {};
+            if (options.skipToast) {
+                return;
+            }
+            const hasExplicitToast = !!(options.type || options.key || options.detail || options.force || typeof options.ttl === 'number');
+            if (!hasExplicitToast && !isError) {
+                return;
+            }
+            showRunToast({
+                message: text,
+                detail: options.detail || '',
+                type: options.type || (isError ? 'error' : 'info'),
+                key: options.key || '',
+                ttl: options.ttl,
+                force: !!options.force
+            });
         }
 
         function clearRunMonitorTimer() {
@@ -1489,7 +1921,7 @@ jQuery(function ($) {
             }).done(function (response) {
                 if (!response.success) {
                     const msg = response.data && response.data.message ? response.data.message : jsT('Не удалось получить прогресс запуска.');
-                    setRunStatus(msg, true);
+                    setRunStatus(msg, true, { type: 'error', key: 'run-monitor', force: true });
                     clearRunMonitorTimer();
                     return;
                 }
@@ -1498,7 +1930,10 @@ jQuery(function ($) {
                 renderRunState(data);
 
                 if (data.is_finished) {
-                    setRunStatus(jsT('Готово. Запуск завершен.'), false);
+                    const run = data.run || {};
+                    const doneCount = Number(run.success_items || 0);
+                    const doneDetail = jsT('Готово записей: ') + doneCount + '.';
+                    setRunStatus(jsT('Генерация завершена.'), false, { type: 'success', key: 'run-monitor', detail: doneDetail, force: true });
                     clearRunMonitorTimer();
                     return;
                 }
@@ -1511,7 +1946,7 @@ jQuery(function ($) {
                 clearRunMonitorTimer();
                 state.runMonitorTimer = window.setTimeout(pollRunState, nextPollDelay);
             }).fail(function () {
-                setRunStatus(jsT('AJAX ошибка при обновлении прогресса.'), true);
+                setRunStatus(jsT('AJAX ошибка при обновлении прогресса.'), true, { type: 'error', key: 'run-monitor', force: true });
                 clearRunMonitorTimer();
                 state.runMonitorTimer = window.setTimeout(pollRunState, 5000);
             });
@@ -1533,6 +1968,12 @@ jQuery(function ($) {
             $runProgressBar.css('width', '0%');
             $runMonitorStats.text(jsT('0% • в очереди ') + Number(queued || 0));
             $runLog.html(jsT('<div class="ucg-muted">Запуск создан. Ждём первые ответы от API...</div>'));
+            setRunStatus(jsT('Генерация запущена...'), false, {
+                type: 'loading',
+                key: 'run-monitor',
+                detail: jsT('В очереди: ') + Number(queued || 0),
+                force: true
+            });
 
             pollRunState();
         }
@@ -1567,7 +2008,8 @@ jQuery(function ($) {
         }
 
         function updateSelectedCount() {
-            $selectedCount.text(String(state.selectedIds.size));
+            const selectedCount = Number(state.selectedIds.size || 0);
+            $selectedCount.text(String(selectedCount));
         }
 
         function normalizeFilters() {
@@ -1717,10 +2159,9 @@ jQuery(function ($) {
             initEnhancedSelects($lengthOption);
 
             const hintText = state.schema.vary_length_hint ? String(state.schema.vary_length_hint) : '';
-            if (hintText) {
-                $varyLengthHint.text(hintText).show();
-            } else {
-                $varyLengthHint.text('').hide();
+            $varyLengthHint.text(hintText);
+            if ($varyLengthHelp.length) {
+                $varyLengthHelp.attr('data-tip', hintText);
             }
         }
 
@@ -1746,7 +2187,7 @@ jQuery(function ($) {
         }
 
         function activeModelItem() {
-            const selectedModelId = String($modelSelect.val() || state.defaultModel || 'auto');
+            const selectedModelId = getEnhancedSelectValue($modelSelect) || String(state.defaultModel || 'auto');
             const models = Array.isArray(state.schema.generation_models) ? state.schema.generation_models : [];
             for (let i = 0; i < models.length; i += 1) {
                 const item = models[i];
@@ -1761,32 +2202,6 @@ jQuery(function ($) {
         }
 
         function updateModelHint() {
-            if (!$modelHint.length) {
-                return;
-            }
-
-            const lengthOptionId = Number($lengthOption.val() || 0);
-            const model = activeModelItem();
-            const credits = estimateCreditsByLength(model, lengthOptionId);
-            const modelName = model && model.name ? String(model.name) : jsT('По умолчанию');
-            const provider = model && model.provider ? String(model.provider) : '';
-            const resolved = model && model.resolved_model ? String(model.resolved_model) : '';
-            const unitLabel = state.schema && state.schema.generation_unit_label
-                ? String(state.schema.generation_unit_label)
-                : jsT('1 единица');
-            let message = jsT('Оценка: ') + '~' + formatCreditsValue(credits, 2) + jsT(' кр за ') + unitLabel;
-            message += ' • ' + modelName;
-            if (provider) {
-                message += ' (' + provider + ')';
-            }
-            if (resolved) {
-                message += ' • ' + resolved;
-            }
-            $modelHint.text(message);
-
-            if ($unitHint.length) {
-                $unitHint.text(jsT('Единица расчёта: ') + unitLabel);
-            }
             renderRunSummary();
         }
 
@@ -1797,8 +2212,8 @@ jQuery(function ($) {
 
             const scenario = getScenario();
             const planned = getPlannedCount();
-            const itemsPerPost = scenarioSupportsItemsPerPost(scenario) ? normalizeItemsPerPost($itemsPerPost.val()) : 1;
-            const plannedUnits = planned > 0 ? (planned * itemsPerPost) : 0;
+            const unitsPerRecord = scenarioSupportsItemsPerPost(scenario) ? normalizeItemsPerPost($itemsPerPost.val()) : 1;
+            const plannedUnits = planned > 0 ? (planned * unitsPerRecord) : 0;
             const lengthOptionId = Number($lengthOption.val() || 0);
             const model = activeModelItem();
             const creditsPerUnit = estimateCreditsByLength(model, lengthOptionId);
@@ -1806,13 +2221,10 @@ jQuery(function ($) {
             const modelName = model && model.name ? String(model.name) : jsT('По умолчанию');
             const provider = model && model.provider ? String(model.provider) : '';
             const resolved = model && model.resolved_model ? String(model.resolved_model) : '';
-            const scope = getSelectionMode() === 'filtered' ? jsT('Все найденные') : jsT('Выбранные вручную');
-            const unitLabel = state.schema && state.schema.generation_unit_label
-                ? String(state.schema.generation_unit_label)
-                : jsT('1 единица');
+            const unitCountLabel = scenario === 'seo_tags' ? jsT('Пакетов') : jsT('Полей');
             const perUnitLabel = scenario === 'seo_tags'
-                ? jsT('Стоимость за SEO-пакет')
-                : jsT('Стоимость за единицу');
+                ? jsT('Цена за пакет')
+                : jsT('Цена за поле');
 
             let modelBase = modelName || provider || jsT('По умолчанию');
             const providerSuffix = provider ? (' (' + provider + ')') : '';
@@ -1825,28 +2237,50 @@ jQuery(function ($) {
                 modelDetails += ' (' + resolved + ')';
             }
 
+            const recordWord = pluralRu(planned, [jsT('запись'), jsT('записи'), jsT('записей')]);
+            const unitForms = scenario === 'seo_tags'
+                ? [jsT('пакет'), jsT('пакета'), jsT('пакетов')]
+                : [jsT('поле'), jsT('поля'), jsT('полей')];
+            const unitWord = pluralRu(unitsPerRecord, unitForms);
+            const formulaText = String(planned) + ' ' + recordWord + ' × ' + String(unitsPerRecord) + ' ' + unitWord + ' × ~' +
+                formatCreditsValue(creditsPerUnit, 2) + ' ' + jsT('кр.') + ' = ~' + formatCreditsValue(totalCredits, 2) + ' ' + jsT('кр.');
+
+            const modelRowValue = '' +
+                '<span class="ucg-run-summary__model-text">' + escapeHtml(modelDetails) + '</span>' +
+                '<button type="button" class="ucg-run-summary__model-change" id="ucg-run-summary-change-model">' + escapeHtml(jsT('Сменить ↗')) + '</button>';
+
+            let rowsHtml = '' +
+                '<li class="ucg-run-summary__row ucg-run-summary__row--model"><span>' + escapeHtml(jsT('Модель')) + '</span><strong class="ucg-run-summary__model-value">' + modelRowValue + '</strong></li>' +
+                '<li class="ucg-run-summary__row"><span>' + escapeHtml(jsT('Записей')) + '</span><strong>' + escapeHtml(String(planned)) + '</strong></li>' +
+                '<li class="ucg-run-summary__row"><span>' + escapeHtml(unitCountLabel) + '</span><strong>' + escapeHtml(String(unitsPerRecord)) + '</strong></li>' +
+                '<li class="ucg-run-summary__row"><span>' + escapeHtml(perUnitLabel) + '</span><strong>~' + escapeHtml(formatCreditsValue(creditsPerUnit, 2)) + ' ' + escapeHtml(jsT('кр.')) + '</strong></li>';
+
             let html = '' +
-                '<div class="ucg-run-summary__head">' +
+                '<div class="ucg-run-summary__top">' +
                 '<h3 class="ucg-run-summary__title">' + escapeHtml(jsT('Сводка запуска')) + '</h3>' +
-                '<strong class="ucg-run-summary__cost">~' + escapeHtml(formatCreditsValue(totalCredits, 2)) + ' ' + escapeHtml(jsT('кр.')) + '</strong>' +
                 '</div>' +
-                '<div class="ucg-run-summary__grid">' +
-                '  <div class="ucg-run-summary__item"><span>' + escapeHtml(jsT('Записей')) + '</span><strong>' + escapeHtml(String(planned)) + '</strong></div>' +
-                (scenarioSupportsItemsPerPost(scenario)
-                    ? ('  <div class="ucg-run-summary__item"><span>' + escapeHtml(jsT('На запись')) + '</span><strong>' + escapeHtml(String(itemsPerPost)) + '</strong></div>'
-                        + '  <div class="ucg-run-summary__item"><span>' + escapeHtml(jsT('Всего единиц')) + '</span><strong>' + escapeHtml(String(plannedUnits)) + '</strong></div>')
-                    : '') +
-                '  <div class="ucg-run-summary__item"><span>' + escapeHtml(perUnitLabel) + '</span><strong>~' + escapeHtml(formatCreditsValue(creditsPerUnit, 2)) + ' ' + escapeHtml(jsT('кр.')) + '</strong></div>' +
-                '  <div class="ucg-run-summary__item"><span>' + escapeHtml(jsT('Модель')) + '</span><strong>' + escapeHtml(modelDetails) + '</strong></div>' +
-                '  <div class="ucg-run-summary__item"><span>' + escapeHtml(jsT('Режим выборки')) + '</span><strong>' + escapeHtml(scope) + '</strong></div>' +
-                '</div>' +
-                '<p class="ucg-run-summary__hint">' + escapeHtml(jsT('Единица расчёта: ')) + escapeHtml(unitLabel) + '</p>';
+                '<ul class="ucg-run-summary__list">' + rowsHtml + '</ul>' +
+                '<div class="ucg-run-summary__total">' +
+                '<span class="ucg-run-summary__total-label">' +
+                escapeHtml(jsT('Стоимость генерации')) +
+                '<button type="button" class="ucg-help-tip ucg-help-tip--bottom ucg-run-summary__formula-tip" aria-label="' + escapeHtml(jsT('Формула стоимости генерации')) + '" data-tip="' + escapeHtml(formulaText) + '">' +
+                '<span class="dashicons dashicons-editor-help" aria-hidden="true"></span>' +
+                '</button>' +
+                '</span>' +
+                '<strong>~' + escapeHtml(formatCreditsValue(totalCredits, 2)) + ' ' + escapeHtml(jsT('кр.')) + '</strong>' +
+                '</div>';
 
             if (planned <= 0) {
-                html += '<p class="ucg-run-summary__hint">' + escapeHtml(jsT('Выберите записи на шаге "Фильтрация".')) + '</p>';
+                html += '<p class="ucg-run-summary__note">' + escapeHtml(jsT('Нет записей для запуска.')) + '</p>';
             }
 
             $runSummary.html(html);
+            if ($step3Total.length) {
+                $step3Total.html(
+                    escapeHtml(jsT('Итого: ')) +
+                    '<strong>~' + escapeHtml(formatCreditsValue(totalCredits, 2)) + ' ' + escapeHtml(jsT('кр.')) + '</strong>'
+                );
+            }
         }
 
         function renderGenerationModels() {
@@ -2148,6 +2582,7 @@ jQuery(function ($) {
         function updateTemplateMode() {
             const templateId = Number($templateSelect.val() || 0);
             const isSelected = templateId > 0;
+            const wantSave = $saveTemplateChanges.is(':checked');
 
             if (isSelected) {
                 $templateNameWrap.hide();
@@ -2155,7 +2590,11 @@ jQuery(function ($) {
                 return;
             }
 
-            $templateNameWrap.show();
+            if (wantSave) {
+                $templateNameWrap.show();
+            } else {
+                $templateNameWrap.hide();
+            }
             $saveTemplateLabel.text(jsT('Сохранить шаблон'));
         }
 
@@ -2273,10 +2712,25 @@ jQuery(function ($) {
 
         function updateSummary() {
             const mode = getSelectionMode();
+            const totalFound = Number(state.total || 0);
+            const selectedManual = Number(state.selectedIds.size || 0);
+            const selectedForRun = mode === 'filtered' ? totalFound : selectedManual;
+
+            if ($previewFoundCount.length) {
+                $previewFoundCount.text(String(totalFound));
+            }
+            if ($selectionModeFilteredTotal.length) {
+                $selectionModeFilteredTotal.text(String(totalFound));
+            }
+            if ($previewSelectedCount.length) {
+                $previewSelectedCount.text(String(selectedForRun));
+                $previewSelectedCount.closest('.ucg-step2-stat').toggleClass('is-active', selectedForRun > 0);
+            }
+
             if (mode === 'filtered') {
-                $previewSummary.text(jsT('Будут использованы все найденные записи: ') + state.total + '.');
+                $previewSummary.text(jsT('Будут использованы все найденные записи: ') + totalFound + '.');
             } else {
-                $previewSummary.text(jsT('Выбрано вручную: ') + state.selectedIds.size + jsT('. Найдено по фильтру: ') + state.total + '.');
+                $previewSummary.text(jsT('Выбрано вручную: ') + selectedManual + jsT('. Найдено по фильтру: ') + totalFound + '.');
             }
             renderRunSummary();
         }
@@ -2401,19 +2855,7 @@ jQuery(function ($) {
                 renderGenerationModels();
                 renderTemplates();
                 renderWizardTokens();
-                // Apply style defaults from schema/settings.
-                if (state.schema && state.schema.settings) {
-                    const s = state.schema.settings || {};
-                    if ($styleLanguage.length && s.default_language) {
-                        setEnhancedSelectValue($styleLanguage, String(s.default_language));
-                    }
-                    if ($styleTone.length && s.default_tone) {
-                        setEnhancedSelectValue($styleTone, String(s.default_tone));
-                    }
-                    if ($styleUniqueness.length && s.default_uniqueness) {
-                        setEnhancedSelectValue($styleUniqueness, String(s.default_uniqueness));
-                    }
-                }
+                applyStyleDefaultsFromSchema();
                 clearFilters();
                 state.selectedIds.clear();
                 updateSelectedCount();
@@ -2442,7 +2884,7 @@ jQuery(function ($) {
             const mode = getSelectionMode();
             const filters = normalizeFilters();
             const lengthOptionId = Number($lengthOption.val() || 0);
-            const model = String($modelSelect.val() || state.defaultModel || 'auto');
+            const model = getEnhancedSelectValue($modelSelect) || String(state.defaultModel || 'auto');
             const varyLength = $varyLength.is(':checked') ? 1 : 0;
             const publishDateRange = collectPublishDateRangeForRun(scenario);
             const styleLanguage = String($styleLanguage.val() || (state.schema && state.schema.settings && state.schema.settings.default_language) || 'auto');
@@ -2497,8 +2939,12 @@ jQuery(function ($) {
                 return;
             }
 
-            const startingText = (window.ucgAdmin && window.ucgAdmin.strings && ucgAdmin.strings.starting_run) ? ucgAdmin.strings.starting_run : jsT('Создаем запуск...');
-            setRunStatus(startingText, false);
+            const startingText = jsT('Генерация запущена...');
+            setRunStatus(startingText, false, {
+                type: 'loading',
+                key: 'run-create',
+                force: true
+            });
             setButtonLoading($button, true);
 
             $.post(ucgAdmin.ajaxUrl, {
@@ -2530,26 +2976,38 @@ jQuery(function ($) {
             }).done(function (response) {
                 if (!response.success) {
                     const msg = response.data && response.data.message ? response.data.message : jsT('Не удалось создать запуск.');
-                    setRunStatus(msg, true);
+                    setRunStatus(msg, true, { type: 'error', key: 'run-create', force: true });
                     return;
                 }
 
                 const data = response.data || {};
                 const runId = Number(data.run_id || 0);
                 const queued = Number(data.queued || 0);
+                const queueWord = pluralRu(queued, [jsT('запись'), jsT('записи'), jsT('записей')]);
+                const queueDetail = jsT('В очереди: ') + queued + ' ' + queueWord + '.';
                 const progressUrl = String(data.progress_url || (runId > 0 ? ('admin.php?page=ucg-run-progress&run_id=' + runId) : ''));
 
                 if (progressUrl) {
-                    setRunStatus(jsT('Запуск #') + runId + jsT(' создан. В очереди: ') + queued + jsT('. Открываем страницу прогресса...'), false);
+                    setRunStatus(jsT('Генерация запущена.'), false, {
+                        type: 'success',
+                        key: 'run-create',
+                        detail: queueDetail,
+                        force: true
+                    });
                     window.setTimeout(function () {
                         window.location.href = progressUrl;
                     }, 250);
                     return;
                 }
 
-                setRunStatus(jsT('Запуск #') + runId + jsT(' создан. В очереди: ') + queued + '.', false);
+                setRunStatus(jsT('Генерация запущена.'), false, {
+                    type: 'success',
+                    key: 'run-create',
+                    detail: queueDetail,
+                    force: true
+                });
             }).fail(function () {
-                setRunStatus(jsT('AJAX ошибка при создании запуска.'), true);
+                setRunStatus(jsT('AJAX ошибка при создании запуска.'), true, { type: 'error', key: 'run-create', force: true });
             }).always(function () {
                 setButtonLoading($button, false);
             });
@@ -2566,7 +3024,7 @@ jQuery(function ($) {
             const mode = getSelectionMode();
             const filters = normalizeFilters();
             const lengthOptionId = Number($lengthOption.val() || 0);
-            const model = String($modelSelect.val() || state.defaultModel || 'auto');
+            const model = getEnhancedSelectValue($modelSelect) || String(state.defaultModel || 'auto');
             const varyLength = $varyLength.is(':checked') ? 1 : 0;
             const styleLanguage = String($styleLanguage.val() || (state.schema && state.schema.settings && state.schema.settings.default_language) || 'auto');
             const styleTone = String($styleTone.val() || (state.schema && state.schema.settings && state.schema.settings.default_tone) || 'neutral');
@@ -2596,7 +3054,11 @@ jQuery(function ($) {
             }
 
             setButtonLoading($button, true);
-            setRunStatus(jsT('Генерируем пример...'), false);
+            setRunStatus(jsT('Генерируем пример...'), false, {
+                type: 'loading',
+                key: 'example-generate',
+                force: true
+            });
 
             $.post(ucgAdmin.ajaxUrl, {
                 action: 'ucg_wizard_example',
@@ -2621,11 +3083,13 @@ jQuery(function ($) {
             }).done(function (response) {
                 if (!response.success) {
                     const msg = response.data && response.data.message ? response.data.message : jsT('Не удалось сгенерировать пример.');
-                    setRunStatus(msg, true);
+                    setRunStatus(msg, true, { type: 'error', key: 'example-generate', force: true });
                     return;
                 }
                 const data = response.data || {};
                 const preview = data.preview;
+                const spent = Number(data.credits_spent || 0);
+                const remaining = Number(data.credits_remaining || 0);
                 let text = '';
                 if (preview && typeof preview === 'object' && (preview.title || preview.description)) {
                     text = 'SEO title:\n' + String(preview.title || '') + '\n\nSEO description:\n' + String(preview.description || '');
@@ -2636,9 +3100,10 @@ jQuery(function ($) {
                     $exampleOutput.val(text);
                 }
                 if ($exampleCredits.length) {
-                    const spent = Number(data.credits_spent || 0);
-                    const remaining = Number(data.credits_remaining || 0);
-                    $exampleCredits.text(jsT('Списано: ') + spent + jsT(' • Осталось: ') + remaining);
+                    $exampleCredits.text(
+                        jsT('Списано: ~') + formatCreditsValue(spent, 2) + ' ' + jsT('кр.') +
+                        jsT(' • Осталось: ') + formatCreditsValue(remaining, 2) + ' ' + jsT('кр.')
+                    );
                 }
                 if ($exampleWrap.length) {
                     $exampleWrap.show();
@@ -2647,9 +3112,23 @@ jQuery(function ($) {
                 if ($('.ucg-balance-value').length) {
                     fetchBalance(false, $('#ucg-refresh-balance'));
                 }
-                setRunStatus(jsT('Пример готов.'), false);
+                const spentLabel = jsT('Списано ~') + formatCreditsValue(spent, 2) + ' ' + jsT('кр.');
+                setRunStatus(jsT('Пример готов.'), false, {
+                    type: 'success',
+                    key: 'example-generate',
+                    detail: spent > 0 ? spentLabel : '',
+                    force: true
+                });
+                if (spent > 0) {
+                    setRunStatus(spentLabel, false, {
+                        type: 'info',
+                        key: 'credits-spent',
+                        detail: jsT('Остаток: ') + formatCreditsValue(remaining, 2) + ' ' + jsT('кр.'),
+                        force: true
+                    });
+                }
             }).fail(function () {
-                setRunStatus(jsT('AJAX ошибка при генерации примера.'), true);
+                setRunStatus(jsT('AJAX ошибка при генерации примера.'), true, { type: 'error', key: 'example-generate', force: true });
             }).always(function () {
                 setButtonLoading($button, false);
             });
@@ -2660,34 +3139,65 @@ jQuery(function ($) {
             const $advancedBody = $('#ucg-advanced-body');
             const $advancedWrap = $('.ucg-advanced');
 
+            if ($toastStack.length) {
+                $toastStack.on('mouseenter', pauseToastTimers);
+                $toastStack.on('mouseleave', resumeToastTimers);
+                $toastStack.on('focusin', pauseToastTimers);
+                $toastStack.on('focusout', function () {
+                    window.setTimeout(function () {
+                        if (!$toastStack.find(':focus').length) {
+                            resumeToastTimers();
+                        }
+                    }, 0);
+                });
+                $toastStack.on('click', '.ucg-toast__close', function () {
+                    const toastId = String($(this).closest('.ucg-toast').attr('data-toast-id') || '');
+                    if (!toastId) {
+                        return;
+                    }
+                    closeToastById(toastId, false);
+                });
+            }
+
             if ($advancedToggle.length && $advancedBody.length) {
-                const storageKey = 'ucg_wizard_advanced_open_v1';
-                const initialOpen = window.localStorage ? (window.localStorage.getItem(storageKey) === '1') : false;
-                if (initialOpen) {
-                    $advancedWrap.addClass('is-open');
-                    $advancedToggle.attr('aria-expanded', 'true');
-                    $advancedBody.prop('hidden', false).show();
-                }
+                const setAdvancedOpen = function (isOpen) {
+                    const next = !!isOpen;
+                    $advancedWrap.toggleClass('is-open', next);
+                    $advancedToggle.attr('aria-expanded', next ? 'true' : 'false');
+                    $advancedBody.prop('hidden', !next).toggle(next);
+                };
+
+                // Initial state must always be closed by default to avoid UI desync.
+                setAdvancedOpen(false);
 
                 $advancedToggle.on('click', function () {
                     const isOpen = $advancedWrap.hasClass('is-open');
                     if (isOpen) {
-                        $advancedWrap.removeClass('is-open');
-                        $advancedToggle.attr('aria-expanded', 'false');
-                        $advancedBody.prop('hidden', true).hide();
-                        if (window.localStorage) {
-                            window.localStorage.setItem(storageKey, '0');
-                        }
+                        setAdvancedOpen(false);
                         return;
                     }
-                    $advancedWrap.addClass('is-open');
-                    $advancedToggle.attr('aria-expanded', 'true');
-                    $advancedBody.prop('hidden', false).show();
-                    if (window.localStorage) {
-                        window.localStorage.setItem(storageKey, '1');
-                    }
+                    setAdvancedOpen(true);
                 });
             }
+
+            $(document).on('click', '#ucg-run-summary-change-model', function () {
+                if (!$modelSelect.length) {
+                    return;
+                }
+                switchStep(3);
+                const modelElement = $modelSelect.get(0);
+                if (modelElement && modelElement.tomselect) {
+                    modelElement.tomselect.focus();
+                    modelElement.tomselect.open();
+                    return;
+                }
+                const $tsControl = $modelSelect.closest('.ts-wrapper').find('.ts-control');
+                if ($tsControl.length) {
+                    $tsControl.trigger('click');
+                    return;
+                }
+                $modelSelect.trigger('focus');
+            });
 
             if ($itemsPerPost.length) {
                 $itemsPerPost.on('change keyup', function () {
@@ -2748,8 +3258,13 @@ jQuery(function ($) {
             });
 
             $('#ucg-step-2-next').on('click', function () {
+                const mode = getSelectionMode();
                 const planned = getPlannedCount();
-                if (planned <= 0) {
+                if (mode === 'selected' && planned <= 0) {
+                    setRunStatus(jsT('Выберите записи вручную или переключитесь на режим "все найденные".'), true);
+                    return;
+                }
+                if (mode === 'filtered' && planned <= 0) {
                     setRunStatus(jsT('Сначала загрузите записи.'), true);
                     return;
                 }
@@ -2808,6 +3323,10 @@ jQuery(function ($) {
 
             $templateSelect.on('change', function () {
                 loadTemplate($(this).val());
+            });
+
+            $saveTemplateChanges.on('change', function () {
+                updateTemplateMode();
             });
 
             $('#ucg-add-filter-row').on('click', function () {
@@ -2937,6 +3456,7 @@ jQuery(function ($) {
         renderGenerationModels();
         renderTemplates();
         renderWizardTokens();
+        applyStyleDefaultsFromSchema();
         clearFilters();
         updateSelectedCount();
         updatePagination();
@@ -2989,8 +3509,7 @@ jQuery(function ($) {
             if (!$status.length) {
                 return;
             }
-            const cls = isError ? 'ucg-status-message ucg-status-message--error' : 'ucg-status-message ucg-status-message--ok';
-            $status.html('<div class="' + cls + '">' + escapeHtml(message) + '</div>');
+            setInlineStatusMessage($status, message, !!isError, 5000);
         }
 
         function setChipStatus(status, label) {
@@ -3242,6 +3761,7 @@ jQuery(function ($) {
     initLogsPage();
     initGenerateWizard();
     initRunProgressPage();
+    initTimedStatusMessages();
 
     const currentKeyText = String($('#ucg-current-key').text() || '').trim();
     setApiKeyUiState(currentKeyText !== '' && currentKeyText !== jsT('не задан'), currentKeyText);
