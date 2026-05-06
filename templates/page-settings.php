@@ -1,5 +1,5 @@
 <?php $has_api_key = $masked_api_key !== ''; ?>
-<div class="wrap ucg-wrap">
+<div class="wrap ucg-wrap ucg-flat-ui">
     <?php $this->render_admin_notice(); ?>
     <?php include UCG_PLUGIN_DIR . 'templates/partials/plugin-header.php'; ?>
 
@@ -79,38 +79,29 @@
             <h3>Стиль генерации (по умолчанию)</h3>
             <p class="ucg-muted">Эти настройки применяются ко всем новым запускам. В мастере запуска их можно будет переопределить.</p>
 
-            <label class="ucg-field">
-                <span>Язык</span>
-                <select id="ucg-default-language" class="ucg-enhanced-select" data-search-enabled="false">
-                    <option value="auto" <?php selected((string) $settings['default_language'], 'auto'); ?>>Авто</option>
-                    <option value="ru" <?php selected((string) $settings['default_language'], 'ru'); ?>>Русский</option>
-                    <option value="en" <?php selected((string) $settings['default_language'], 'en'); ?>>English</option>
-                </select>
-            </label>
+            <div class="ucg-form-grid ucg-settings-style-grid">
+                <label class="ucg-field">
+                    <span>Язык</span>
+                    <select id="ucg-default-language" class="ucg-enhanced-select" data-search-enabled="false">
+                        <option value="auto" <?php selected((string) $settings['default_language'], 'auto'); ?>>Авто</option>
+                        <option value="ru" <?php selected((string) $settings['default_language'], 'ru'); ?>>Русский</option>
+                        <option value="en" <?php selected((string) $settings['default_language'], 'en'); ?>>English</option>
+                    </select>
+                </label>
 
-            <label class="ucg-field">
-                <span>Тон</span>
-                <select id="ucg-default-tone" class="ucg-enhanced-select" data-search-enabled="false">
-                    <option value="neutral" <?php selected((string) $settings['default_tone'], 'neutral'); ?>>Нейтральный</option>
-                    <option value="official" <?php selected((string) $settings['default_tone'], 'official'); ?>>Официальный</option>
-                    <option value="friendly" <?php selected((string) $settings['default_tone'], 'friendly'); ?>>Дружелюбный</option>
-                </select>
-            </label>
-
-            <label class="ucg-field">
-                <span>Уникальность</span>
-                <select id="ucg-default-uniqueness" class="ucg-enhanced-select" data-search-enabled="false">
-                    <option value="low" <?php selected((string) $settings['default_uniqueness'], 'low'); ?>>Низкая</option>
-                    <option value="medium" <?php selected((string) $settings['default_uniqueness'], 'medium'); ?>>Средняя</option>
-                    <option value="high" <?php selected((string) $settings['default_uniqueness'], 'high'); ?>>Высокая</option>
-                </select>
-            </label>
+                <label class="ucg-field">
+                    <span>Тон</span>
+                    <select id="ucg-default-tone" class="ucg-enhanced-select" data-search-enabled="false">
+                        <option value="neutral" <?php selected((string) $settings['default_tone'], 'neutral'); ?>>Нейтральный</option>
+                        <option value="official" <?php selected((string) $settings['default_tone'], 'official'); ?>>Официальный</option>
+                        <option value="friendly" <?php selected((string) $settings['default_tone'], 'friendly'); ?>>Дружелюбный</option>
+                    </select>
+                </label>
+            </div>
 
             <div class="ucg-actions-row ucg-actions-row--footer">
                 <button type="button" class="button ucg-btn ucg-btn--primary" id="ucg-save-style-defaults">Сохранить</button>
             </div>
         </section>
     </div>
-
-    <div id="ucg-api-status" class="ucg-api-status" aria-live="polite"></div>
 </div>

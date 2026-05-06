@@ -588,6 +588,7 @@ if (!class_exists('UCG_DB')) {
                 'status' => '%s',
                 'prompt' => '%s',
                 'generated_text' => '%s',
+                'generated_fields_json' => '%s',
                 'error_message' => '%s',
                 'credits_spent' => '%f',
                 'credits_remaining' => '%f',

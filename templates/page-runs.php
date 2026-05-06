@@ -1,4 +1,4 @@
-<div class="wrap ucg-wrap">
+<div class="wrap ucg-wrap ucg-flat-ui">
     <?php $this->render_admin_notice(); ?>
     <?php include UCG_PLUGIN_DIR . 'templates/partials/plugin-header.php'; ?>
 
@@ -49,6 +49,7 @@
                                 <a class="button button-small" href="<?php echo esc_url(admin_url('admin.php?page=ucg-run-progress&run_id=' . (int) $run['id'])); ?>">Прогресс</a>
                             <?php endif; ?>
                             <a class="button button-small" href="<?php echo esc_url(admin_url('admin.php?page=ucg-review&run_id=' . (int) $run['id'])); ?>">Проверка</a>
+                            <a class="button button-small" href="<?php echo esc_url(admin_url('admin.php?page=ucg-generate&repeat_run_id=' . (int) $run['id'])); ?>">Повторить</a>
                         </td>
                     </tr>
                 <?php endforeach; ?>

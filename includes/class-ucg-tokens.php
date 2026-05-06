@@ -173,7 +173,8 @@ if (!class_exists('UCG_Tokens')) {
 
         public static function write_generated_value($post_id, $target_field, $text, $context = array()) {
             $post_id = (int) $post_id;
-            $text = (string) $text;
+            $raw_value = $text;
+            $text = self::value_to_string($text);
             $context = is_array($context) ? $context : array();
             $target_field = self::normalize_field($target_field);
             if ($post_id <= 0 || $target_field === '') {
@@ -182,9 +183,71 @@ if (!class_exists('UCG_Tokens')) {
 
             if (strpos($target_field, 'post:') === 0) {
                 $field_name = substr($target_field, 5);
-                $allowed = array('post_content', 'post_excerpt', 'post_title');
+                $allowed = array('post_content', 'post_excerpt', 'post_title', 'post_status', 'post_author', 'post_date');
                 if (!in_array($field_name, $allowed, true)) {
                     return new WP_Error('ucg_invalid_post_field', __('Недоступное поле записи.', 'unicontent-ai-generator'));
+                }
+
+                if ($field_name === 'post_status') {
+                    $candidate_status = sanitize_key(is_scalar($raw_value) ? (string) $raw_value : $text);
+                    if ($candidate_status === '') {
+                        return new WP_Error('ucg_invalid_post_status', __('Некорректный статус записи.', 'unicontent-ai-generator'));
+                    }
+                    $available = get_post_stati();
+                    if (!in_array($candidate_status, $available, true)) {
+                        return new WP_Error('ucg_invalid_post_status', __('Недоступный статус записи.', 'unicontent-ai-generator'));
+                    }
+                    $result = wp_update_post(
+                        array(
+                            'ID' => $post_id,
+                            'post_status' => $candidate_status,
+                        ),
+                        true
+                    );
+                    if (is_wp_error($result)) {
+                        return $result;
+                    }
+                    return true;
+                }
+
+                if ($field_name === 'post_author') {
+                    $candidate_author = is_scalar($raw_value) ? trim((string) $raw_value) : $text;
+                    $author_id = self::resolve_user_id_for_post_author($candidate_author);
+                    if ($author_id <= 0) {
+                        return new WP_Error('ucg_invalid_post_author', __('Некорректный автор записи.', 'unicontent-ai-generator'));
+                    }
+
+                    $result = wp_update_post(
+                        array(
+                            'ID' => $post_id,
+                            'post_author' => $author_id,
+                        ),
+                        true
+                    );
+                    if (is_wp_error($result)) {
+                        return $result;
+                    }
+                    return true;
+                }
+
+                if ($field_name === 'post_date') {
+                    $normalized_date = self::normalize_post_date_for_write($raw_value);
+                    if (is_wp_error($normalized_date)) {
+                        return $normalized_date;
+                    }
+                    $result = wp_update_post(
+                        array(
+                            'ID' => $post_id,
+                            'post_date' => isset($normalized_date['local']) ? (string) $normalized_date['local'] : '',
+                            'post_date_gmt' => isset($normalized_date['gmt']) ? (string) $normalized_date['gmt'] : '',
+                            'edit_date' => true,
+                        ),
+                        true
+                    );
+                    if (is_wp_error($result)) {
+                        return $result;
+                    }
+                    return true;
                 }
 
                 $result = wp_update_post(
@@ -208,7 +271,7 @@ if (!class_exists('UCG_Tokens')) {
                     return new WP_Error('ucg_invalid_meta_key', __('Некорректный meta key.', 'unicontent-ai-generator'));
                 }
 
-                update_post_meta($post_id, $meta_key, $text);
+                update_post_meta($post_id, $meta_key, $raw_value);
                 return true;
             }
 
@@ -219,9 +282,22 @@ if (!class_exists('UCG_Tokens')) {
                 }
 
                 if (function_exists('update_field')) {
-                    update_field($acf_name, $text, $post_id);
+                    update_field($acf_name, $raw_value, $post_id);
                 } else {
-                    update_post_meta($post_id, $acf_name, $text);
+                    update_post_meta($post_id, $acf_name, $raw_value);
+                }
+                return true;
+            }
+
+            if (strpos($target_field, 'tax:') === 0) {
+                $taxonomy = sanitize_key(substr($target_field, 4));
+                if ($taxonomy === '' || !taxonomy_exists($taxonomy)) {
+                    return new WP_Error('ucg_invalid_taxonomy', __('Некорректная таксономия.', 'unicontent-ai-generator'));
+                }
+                $terms = self::normalize_taxonomy_terms_for_write($raw_value);
+                $result = wp_set_object_terms($post_id, $terms, $taxonomy, false);
+                if (is_wp_error($result)) {
+                    return $result;
                 }
                 return true;
             }
@@ -237,6 +313,13 @@ if (!class_exists('UCG_Tokens')) {
 
             if (strpos($target_field, 'woo_review:') === 0) {
                 return self::write_generated_woo_review($post_id, $text, $context);
+            }
+
+            if (strpos($target_field, 'media:') === 0) {
+                if (!class_exists('UCG_Media')) {
+                    return new WP_Error('ucg_media_unavailable', __('Модуль обработки изображений недоступен.', 'unicontent-ai-generator'));
+                }
+                return UCG_Media::write_generated_value($post_id, $target_field, $raw_value);
             }
 
             return new WP_Error('ucg_target_not_supported', __('Тип целевого поля не поддерживается.', 'unicontent-ai-generator'));
@@ -466,6 +549,77 @@ if (!class_exists('UCG_Tokens')) {
                 return '';
             }
             return $value;
+        }
+
+        protected static function resolve_user_id_for_post_author($raw_value) {
+            $candidate = trim((string) $raw_value);
+            if ($candidate === '') {
+                return 0;
+            }
+
+            if (ctype_digit($candidate)) {
+                $candidate_id = (int) $candidate;
+                $user = get_user_by('id', $candidate_id);
+                if ($user instanceof WP_User) {
+                    return $candidate_id;
+                }
+            }
+
+            foreach (array('login', 'email', 'slug') as $lookup_type) {
+                $user = get_user_by($lookup_type, $candidate);
+                if ($user instanceof WP_User && !empty($user->ID)) {
+                    return (int) $user->ID;
+                }
+            }
+
+            return 0;
+        }
+
+        protected static function normalize_post_date_for_write($raw_value) {
+            $value = is_scalar($raw_value) ? trim((string) $raw_value) : '';
+            if ($value === '') {
+                return new WP_Error('ucg_invalid_post_date', __('Некорректная дата публикации.', 'unicontent-ai-generator'));
+            }
+
+            $normalized = strtolower($value);
+            if ($normalized === 'now' || $normalized === 'сейчас' || $normalized === 'current') {
+                $gmt_timestamp = current_time('timestamp', true);
+                if ($gmt_timestamp <= 0) {
+                    $gmt_timestamp = time();
+                }
+                $gmt_date = gmdate('Y-m-d H:i:s', $gmt_timestamp);
+                return array(
+                    'local' => get_date_from_gmt($gmt_date, 'Y-m-d H:i:s'),
+                    'gmt' => $gmt_date,
+                );
+            }
+
+            $normalized_value = str_replace('T', ' ', $value);
+            $normalized_value = preg_replace('/\s+/', ' ', trim((string) $normalized_value));
+            if (!is_string($normalized_value) || $normalized_value === '') {
+                return new WP_Error('ucg_invalid_post_date', __('Некорректная дата публикации.', 'unicontent-ai-generator'));
+            }
+
+            $timezone = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('UTC');
+            $formats = array('Y-m-d H:i:s', 'Y-m-d H:i', 'Y-m-d');
+            $date = null;
+            foreach ($formats as $format) {
+                $candidate = DateTimeImmutable::createFromFormat($format, $normalized_value, $timezone);
+                if ($candidate instanceof DateTimeImmutable) {
+                    $date = $candidate;
+                    break;
+                }
+            }
+
+            if (!$date instanceof DateTimeImmutable) {
+                return new WP_Error('ucg_invalid_post_date', __('Некорректная дата публикации. Используйте формат YYYY-MM-DD HH:MM.', 'unicontent-ai-generator'));
+            }
+
+            $date_utc = $date->setTimezone(new DateTimeZone('UTC'));
+            return array(
+                'local' => $date->format('Y-m-d H:i:s'),
+                'gmt' => $date_utc->format('Y-m-d H:i:s'),
+            );
         }
 
         protected static function get_known_seo_target_fields() {
@@ -835,8 +989,23 @@ if (!class_exists('UCG_Tokens')) {
 
             if (strpos($target_field, 'post:') === 0) {
                 $field_name = substr($target_field, 5);
-                if (!in_array($field_name, array('post_content', 'post_excerpt', 'post_title'), true)) {
+                if (!in_array($field_name, array('post_content', 'post_excerpt', 'post_title', 'post_status', 'post_author', 'post_date'), true)) {
                     return '';
+                }
+                if ($field_name === 'post_author') {
+                    $author_id = isset($post->post_author) ? (int) $post->post_author : 0;
+                    if ($author_id <= 0) {
+                        return '';
+                    }
+                    $author = get_user_by('id', $author_id);
+                    if (!$author instanceof WP_User) {
+                        return (string) $author_id;
+                    }
+                    $author_name = isset($author->display_name) ? (string) $author->display_name : '';
+                    if ($author_name === '') {
+                        $author_name = isset($author->user_login) ? (string) $author->user_login : (string) $author_id;
+                    }
+                    return $author_name;
                 }
                 return isset($post->{$field_name}) ? (string) $post->{$field_name} : '';
             }
@@ -852,6 +1021,28 @@ if (!class_exists('UCG_Tokens')) {
                     return self::value_to_string(get_field($acf_name, $post_id));
                 }
                 return self::value_to_string(get_post_meta($post_id, $acf_name, true));
+            }
+
+            if (strpos($target_field, 'tax:') === 0) {
+                $taxonomy = sanitize_key(substr($target_field, 4));
+                if ($taxonomy === '' || !taxonomy_exists($taxonomy)) {
+                    return '';
+                }
+                $terms = get_the_terms($post_id, $taxonomy);
+                if (is_wp_error($terms) || !is_array($terms) || empty($terms)) {
+                    return '';
+                }
+                $names = array();
+                foreach ($terms as $term) {
+                    if (!$term instanceof WP_Term) {
+                        continue;
+                    }
+                    $names[] = (string) $term->name;
+                }
+                if (empty($names)) {
+                    return '';
+                }
+                return implode(', ', $names);
             }
 
             if (strpos($target_field, 'seo:') === 0) {
@@ -913,6 +1104,43 @@ if (!class_exists('UCG_Tokens')) {
                     $result = '[' . __('Оценка', 'unicontent-ai-generator') . ': ' . $rating . '/5] ' . $result;
                 }
                 return $result;
+            }
+
+            if ($target_field === 'media:featured') {
+                $thumbnail_id = (int) get_post_thumbnail_id($post_id);
+                if ($thumbnail_id <= 0) {
+                    return '';
+                }
+                $url = wp_get_attachment_url($thumbnail_id);
+                return is_string($url) ? $url : '';
+            }
+
+            if ($target_field === 'media:product_images' || $target_field === 'media:gallery') {
+                $ids = array();
+                $thumbnail_id = (int) get_post_thumbnail_id($post_id);
+                if ($thumbnail_id > 0) {
+                    $ids[] = $thumbnail_id;
+                }
+                $gallery_raw = get_post_meta($post_id, '_product_image_gallery', true);
+                if (is_string($gallery_raw) && trim($gallery_raw) !== '') {
+                    $parts = array_filter(array_map('intval', explode(',', $gallery_raw)));
+                    foreach ($parts as $attachment_id) {
+                        if ($attachment_id > 0 && !in_array($attachment_id, $ids, true)) {
+                            $ids[] = $attachment_id;
+                        }
+                    }
+                }
+                if (empty($ids)) {
+                    return '';
+                }
+                $urls = array();
+                foreach ($ids as $attachment_id) {
+                    $url = wp_get_attachment_url((int) $attachment_id);
+                    if (is_string($url) && $url !== '') {
+                        $urls[] = $url;
+                    }
+                }
+                return implode(', ', $urls);
             }
 
             return '';
@@ -1161,6 +1389,49 @@ if (!class_exists('UCG_Tokens')) {
             }
 
             return (string) $value;
+        }
+
+        protected static function normalize_taxonomy_terms_for_write($value) {
+            $items = array();
+            if (is_array($value)) {
+                $items = $value;
+            } elseif (is_object($value)) {
+                $items = (array) $value;
+            } else {
+                $string_value = trim((string) $value);
+                if ($string_value === '') {
+                    return array();
+                }
+                $decoded = json_decode($string_value, true);
+                if (is_array($decoded)) {
+                    $items = $decoded;
+                } else {
+                    $items = preg_split('/\s*,\s*/', $string_value);
+                }
+            }
+
+            $normalized = array();
+            foreach ((array) $items as $item) {
+                if (is_array($item) || is_object($item)) {
+                    continue;
+                }
+                $term_value = trim((string) $item);
+                if ($term_value === '') {
+                    continue;
+                }
+                if (ctype_digit($term_value)) {
+                    $normalized[] = (int) $term_value;
+                    continue;
+                }
+                $normalized[] = sanitize_text_field($term_value);
+            }
+
+            return array_values(array_unique(array_filter($normalized, function ($item) {
+                if (is_int($item)) {
+                    return $item > 0;
+                }
+                return is_string($item) && $item !== '';
+            })));
         }
 
         protected static function normalize_field($field) {

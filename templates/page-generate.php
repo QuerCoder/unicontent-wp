@@ -24,7 +24,7 @@ $header_hide_mark = true;
                 <span class="ucg-stepper__sep" aria-hidden="true">|</span>
                 <button type="button" class="ucg-stepper__item" data-step-target="2">
                     <span class="ucg-stepper__num">2</span>
-                    <span class="ucg-stepper__label">Фильтрация</span>
+                    <span class="ucg-stepper__label">Элементы</span>
                 </button>
                 <span class="ucg-stepper__sep" aria-hidden="true">|</span>
                 <button type="button" class="ucg-stepper__item" data-step-target="3">
@@ -37,128 +37,119 @@ $header_hide_mark = true;
                 <div class="ucg-card ucg-step1-card">
                 <div class="ucg-field ucg-scenario-field">
                     <h3 class="ucg-launch-card-title">Что генерировать</h3>
-                    <div class="ucg-scenario-picker" id="ucg-wizard-scenario-picker">
-                        <?php if (!empty($scenario_options) && is_array($scenario_options)) : ?>
-                            <?php foreach ($scenario_options as $scenario_item) : ?>
-                                <?php
+                    <div class="ucg-scenario-groups" id="ucg-wizard-scenario-picker">
+                        <?php
+                        $scenario_map = array();
+                        if (!empty($scenario_options) && is_array($scenario_options)) {
+                            foreach ($scenario_options as $scenario_item) {
+                                if (!is_array($scenario_item)) {
+                                    continue;
+                                }
                                 $scenario_value = isset($scenario_item['value']) ? sanitize_key((string) $scenario_item['value']) : '';
-                                $scenario_label = isset($scenario_item['label']) ? (string) $scenario_item['label'] : $scenario_value;
-                                $scenario_icon = isset($scenario_item['icon']) ? (string) $scenario_item['icon'] : 'dashicons-admin-generic';
-                                $scenario_description = isset($scenario_item['description']) ? trim((string) $scenario_item['description']) : '';
-                                $scenario_available = !empty($scenario_item['is_available']);
                                 if ($scenario_value === '') {
                                     continue;
                                 }
-                                $unavailable_label = '';
-                                if (!$scenario_available) {
-                                    $unavailable_label = __('Неактивен', 'unicontent-ai-generator');
-                                    if ($scenario_value === 'woo_reviews') {
-                                        $unavailable_label = __('WooCommerce отключен', 'unicontent-ai-generator');
-                                    } elseif ($scenario_value === 'seo_tags') {
-                                        $unavailable_label = __('SEO плагин не найден', 'unicontent-ai-generator');
-                                    }
+                                $scenario_map[$scenario_value] = $scenario_item;
+                            }
+                        }
+                        $scenario_groups = array(
+                            array(
+                                'key' => 'create',
+                                'title' => __('Создать новые', 'unicontent-ai-generator'),
+                                'items' => array('post_fields', 'product_fields', 'image_generation'),
+                            ),
+                            array(
+                                'key' => 'update',
+                                'title' => __('Обновить существующие', 'unicontent-ai-generator'),
+                                'items' => array('field_update', 'seo_tags', 'comments', 'woo_reviews'),
+                            ),
+                        );
+                        ?>
+                        <?php if (!empty($scenario_map)) : ?>
+                            <?php foreach ($scenario_groups as $scenario_group) : ?>
+                                <?php
+                                $group_key = isset($scenario_group['key']) ? sanitize_key((string) $scenario_group['key']) : '';
+                                $group_title = isset($scenario_group['title']) ? (string) $scenario_group['title'] : '';
+                                $group_items = isset($scenario_group['items']) && is_array($scenario_group['items']) ? $scenario_group['items'] : array();
+                                if ($group_title === '' || empty($group_items)) {
+                                    continue;
+                                }
+                                $group_classes = 'ucg-scenario-group';
+                                if ($group_key !== '') {
+                                    $group_classes .= ' ucg-scenario-group--' . $group_key;
                                 }
                                 ?>
-                                <label class="ucg-scenario-card<?php echo $scenario_available ? '' : ' is-disabled'; ?>">
-                                    <input
-                                        class="ucg-scenario-card__input"
-                                        type="radio"
-                                        name="ucg-wizard-scenario"
-                                        value="<?php echo esc_attr($scenario_value); ?>"
-                                        <?php checked((string) $scenario, $scenario_value); ?>
-                                        <?php disabled(!$scenario_available); ?>
-                                    >
-                                    <span class="ucg-scenario-card__surface">
-                                        <span class="ucg-scenario-card__icon-wrap" aria-hidden="true">
-                                            <span class="dashicons <?php echo esc_attr($scenario_icon); ?>"></span>
-                                        </span>
-                                        <span class="ucg-scenario-card__content">
-                                            <span class="ucg-scenario-card__label"><?php echo esc_html($scenario_label); ?></span>
-                                            <?php if (!$scenario_available) : ?>
-                                                <span class="ucg-scenario-card__status"><?php echo esc_html($unavailable_label); ?></span>
+                                <section class="<?php echo esc_attr($group_classes); ?>">
+                                    <h4 class="ucg-scenario-group__title"><?php echo esc_html($group_title); ?></h4>
+                                    <div class="ucg-scenario-picker">
+                                        <?php foreach ($group_items as $scenario_value) : ?>
+                                            <?php $scenario_value = sanitize_key((string) $scenario_value); ?>
+                                            <?php if (!isset($scenario_map[$scenario_value]) || !is_array($scenario_map[$scenario_value])) : ?>
+                                                <?php continue; ?>
                                             <?php endif; ?>
-                                            <?php if ($scenario_description !== '') : ?>
-                                                <span class="ucg-scenario-card__desc"><?php echo esc_html($scenario_description); ?></span>
-                                            <?php endif; ?>
-                                        </span>
-                                    </span>
-                                </label>
+                                            <?php
+                                            $scenario_item = $scenario_map[$scenario_value];
+                                            $scenario_label = isset($scenario_item['label']) ? (string) $scenario_item['label'] : $scenario_value;
+                                            $scenario_icon = isset($scenario_item['icon']) ? (string) $scenario_item['icon'] : 'dashicons-admin-generic';
+                                            $scenario_description = isset($scenario_item['description']) ? trim((string) $scenario_item['description']) : '';
+                                            $scenario_available = !empty($scenario_item['is_available']);
+                                            $unavailable_label = '';
+                                            if (!$scenario_available) {
+                                                $unavailable_label = __('Неактивен', 'unicontent-ai-generator');
+                                                if ($scenario_value === 'woo_reviews' || $scenario_value === 'product_fields') {
+                                                    $unavailable_label = __('WooCommerce отключен', 'unicontent-ai-generator');
+                                                } elseif ($scenario_value === 'seo_tags') {
+                                                    $unavailable_label = __('SEO плагин не найден', 'unicontent-ai-generator');
+                                                }
+                                            }
+                                            ?>
+                                            <label class="ucg-scenario-card<?php echo $scenario_available ? '' : ' is-disabled'; ?>">
+                                                <input
+                                                    class="ucg-scenario-card__input"
+                                                    type="radio"
+                                                    name="ucg-wizard-scenario"
+                                                    value="<?php echo esc_attr($scenario_value); ?>"
+                                                    <?php checked((string) $scenario, $scenario_value); ?>
+                                                    <?php disabled(!$scenario_available); ?>
+                                                >
+                                                <span class="ucg-scenario-card__surface">
+                                                    <span class="ucg-scenario-card__icon-wrap" aria-hidden="true">
+                                                        <span class="dashicons <?php echo esc_attr($scenario_icon); ?>"></span>
+                                                    </span>
+                                                    <span class="ucg-scenario-card__content">
+                                                        <span class="ucg-scenario-card__label"><?php echo esc_html($scenario_label); ?></span>
+                                                        <?php if (!$scenario_available) : ?>
+                                                            <span class="ucg-scenario-card__status"><?php echo esc_html($unavailable_label); ?></span>
+                                                        <?php endif; ?>
+                                                        <?php if ($scenario_description !== '') : ?>
+                                                            <span class="ucg-scenario-card__desc"><?php echo esc_html($scenario_description); ?></span>
+                                                        <?php endif; ?>
+                                                    </span>
+                                                </span>
+                                            </label>
+                                        <?php endforeach; ?>
+                                    </div>
+                                </section>
                             <?php endforeach; ?>
                         <?php else : ?>
-                            <label class="ucg-scenario-card">
-                                <input class="ucg-scenario-card__input" type="radio" name="ucg-wizard-scenario" value="field_update" checked>
-                                <span class="ucg-scenario-card__surface">
-                                    <span class="ucg-scenario-card__icon-wrap" aria-hidden="true">
-                                        <span class="dashicons dashicons-edit-page"></span>
-                                    </span>
-                                    <span class="ucg-scenario-card__content">
-                                        <span class="ucg-scenario-card__label">Поля</span>
-                                    </span>
-                                </span>
-                            </label>
+                            <section class="ucg-scenario-group ucg-scenario-group--update">
+                                <h4 class="ucg-scenario-group__title"><?php esc_html_e('Обновить существующие', 'unicontent-ai-generator'); ?></h4>
+                                <div class="ucg-scenario-picker">
+                                    <label class="ucg-scenario-card">
+                                        <input class="ucg-scenario-card__input" type="radio" name="ucg-wizard-scenario" value="field_update" checked>
+                                        <span class="ucg-scenario-card__surface">
+                                            <span class="ucg-scenario-card__icon-wrap" aria-hidden="true">
+                                                <span class="dashicons dashicons-edit-page"></span>
+                                            </span>
+                                            <span class="ucg-scenario-card__content">
+                                                <span class="ucg-scenario-card__label"><?php esc_html_e('Любые поля', 'unicontent-ai-generator'); ?></span>
+                                            </span>
+                                        </span>
+                                    </label>
+                                </div>
+                            </section>
                         <?php endif; ?>
                     </div>
-                </div>
-
-                <div class="ucg-grid-3">
-                    <label class="ucg-field">
-                        <span>Тип записей</span>
-                        <select id="ucg-wizard-post-type" class="ucg-enhanced-select" data-search-enabled="false" data-placeholder="Выберите тип">
-                            <?php foreach ($post_types as $post_type_item) : ?>
-                                <option value="<?php echo esc_attr((string) $post_type_item['value']); ?>" <?php selected($post_type, (string) $post_type_item['value']); ?>>
-                                    <?php echo esc_html((string) $post_type_item['label']); ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </label>
-
-                    <label class="ucg-field" id="ucg-wizard-target-field-wrap">
-                        <span id="ucg-wizard-target-field-label"><?php echo esc_html(isset($target_field_label) ? $target_field_label : 'Целевое поле'); ?></span>
-                        <select
-                            id="ucg-wizard-target-field"
-                            class="ucg-enhanced-select"
-                            data-search-enabled="false"
-                            data-placeholder="Выберите поле"
-                        >
-                            <option value="">Выберите поле</option>
-                            <?php if (!empty($target_fields) && is_array($target_fields)) : ?>
-                                <?php foreach ($target_fields as $field_item) : ?>
-                                    <?php
-                                    $field_value = isset($field_item['value']) ? (string) $field_item['value'] : '';
-                                    $field_label = isset($field_item['label']) ? (string) $field_item['label'] : $field_value;
-                                    if ($field_value === '') {
-                                        continue;
-                                    }
-                                    ?>
-                                    <option value="<?php echo esc_attr($field_value); ?>"><?php echo esc_html($field_label); ?></option>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
-                        </select>
-                    </label>
-
-                    <label class="ucg-field" id="ucg-wizard-items-per-post-wrap" style="display:none;">
-                        <span class="ucg-label-with-help">
-                            Количество на запись
-                            <button
-                                type="button"
-                                class="ucg-help-tip"
-                                id="ucg-items-per-post-help"
-                                aria-label="Подсказка по количеству на запись"
-                                data-tip="Сколько комментариев/отзывов сгенерировать на одну запись."
-                            >
-                                <span class="dashicons dashicons-editor-help" aria-hidden="true"></span>
-                            </button>
-                        </span>
-                        <input
-                            type="number"
-                            id="ucg-wizard-items-per-post"
-                            min="1"
-                            max="50"
-                            step="1"
-                            value="1"
-                        >
-                    </label>
-
                 </div>
 
                 </div>
@@ -169,60 +160,152 @@ $header_hide_mark = true;
             </section>
 
             <section class="ucg-step-panel" data-step="2">
+                <div class="ucg-card ucg-step2-context-card">
+                    <h3 class="ucg-launch-card-title">Параметры сценария</h3>
+                    <div class="ucg-grid-3 ucg-step2-context-grid">
+                        <label class="ucg-field" id="ucg-wizard-post-type-wrap">
+                            <span>Тип записей</span>
+                            <select id="ucg-wizard-post-type" class="ucg-enhanced-select" data-search-enabled="false" data-placeholder="Выберите тип">
+                                <?php foreach ($post_types as $post_type_item) : ?>
+                                    <option value="<?php echo esc_attr((string) $post_type_item['value']); ?>" <?php selected($post_type, (string) $post_type_item['value']); ?>>
+                                        <?php echo esc_html((string) $post_type_item['label']); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </label>
+
+                        <label class="ucg-field" id="ucg-wizard-target-field-wrap">
+                            <span id="ucg-wizard-target-field-label"><?php echo esc_html(isset($target_field_label) ? $target_field_label : 'Целевое поле'); ?></span>
+                            <select
+                                id="ucg-wizard-target-field"
+                                class="ucg-enhanced-select"
+                                data-search-enabled="false"
+                                data-placeholder="Выберите поле"
+                            >
+                                <option value="">Выберите поле</option>
+                                <?php if (!empty($target_fields) && is_array($target_fields)) : ?>
+                                    <?php foreach ($target_fields as $field_item) : ?>
+                                        <?php
+                                        $field_value = isset($field_item['value']) ? (string) $field_item['value'] : '';
+                                        $field_label = isset($field_item['label']) ? (string) $field_item['label'] : $field_value;
+                                        if ($field_value === '') {
+                                            continue;
+                                        }
+                                        ?>
+                                        <option value="<?php echo esc_attr($field_value); ?>"><?php echo esc_html($field_label); ?></option>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                            </select>
+                        </label>
+
+                        <label class="ucg-field" id="ucg-wizard-items-per-post-wrap" style="display:none;">
+                            <span class="ucg-label-with-help">
+                                Количество на запись
+                                <button
+                                    type="button"
+                                    class="ucg-help-tip"
+                                    id="ucg-items-per-post-help"
+                                    aria-label="Подсказка по количеству на запись"
+                                    data-tip="Сколько комментариев/отзывов сгенерировать на одну запись."
+                                >
+                                    <span class="dashicons dashicons-editor-help" aria-hidden="true"></span>
+                                </button>
+                            </span>
+                            <input
+                                type="number"
+                                id="ucg-wizard-items-per-post"
+                                min="1"
+                                max="50"
+                                step="1"
+                                value="1"
+                            >
+                        </label>
+                    </div>
+                </div>
+
                 <div class="ucg-card ucg-step2-card">
-                    <div class="ucg-step2-head">
-                        <div class="ucg-step2-head__meta">
-                            <h3 class="ucg-launch-card-title">Фильтры</h3>
-                            <p class="ucg-muted">Необязательно. Без фильтров показываем все записи выбранного типа.</p>
-                        </div>
-                        <div class="ucg-step2-head__actions">
-                            <button type="button" class="button" id="ucg-add-filter-row">+ Добавить фильтр</button>
-                            <button type="button" class="button button-primary" id="ucg-preview-posts">Обновить список</button>
-                        </div>
-                    </div>
-
-                    <div id="ucg-filter-rows" class="ucg-filter-rows ucg-step2-filter-rows"></div>
-
-                    <div class="ucg-step2-stats">
-                        <span class="ucg-step2-stat ucg-step2-stat--found">Найдено: <strong id="ucg-preview-found-count">0</strong></span>
-                        <span class="ucg-step2-stats__divider" aria-hidden="true"></span>
-                        <span class="ucg-step2-stat ucg-step2-stat--selected">Выбрано: <strong id="ucg-preview-selected-count">0</strong></span>
-                        <span class="screen-reader-text" id="ucg-preview-summary">Загружаем записи выбранного типа...</span>
-                    </div>
-
-                    <div class="ucg-selection-mode ucg-step2-mode">
-                        <div class="ucg-step2-mode__seg" role="radiogroup" aria-label="Режим выбора записей">
+                    <div class="ucg-selection-mode ucg-step2-mode" id="ucg-run-mode-wrap" hidden>
+                        <div class="ucg-step2-mode__seg" role="radiogroup" aria-label="Режим работы">
                             <label class="ucg-step2-mode__option">
-                                <input type="radio" name="ucg-selection-mode" value="selected" checked>
-                                <span>Выбрать вручную</span>
+                                <input type="radio" name="ucg-run-target-mode" value="update_existing" checked>
+                                <span>Обновить существующие записи</span>
                             </label>
                             <label class="ucg-step2-mode__option">
-                                <input type="radio" name="ucg-selection-mode" value="filtered">
-                                <span>Все найденные (<strong id="ucg-selection-mode-filtered-total">0</strong>)</span>
+                                <input type="radio" name="ucg-run-target-mode" value="create_new">
+                                <span>Создать новые записи</span>
                             </label>
                         </div>
                     </div>
 
-                    <div class="ucg-preview-table-wrap ucg-step2-table-wrap">
-                        <table class="widefat striped">
-                            <thead>
-                            <tr>
-                                <th style="width:45px;"><input type="checkbox" id="ucg-preview-select-page"></th>
-                                <th style="width:80px;">ID</th>
-                                <th>Заголовок</th>
-                                <th style="width:140px;">Статус</th>
-                                <th style="width:190px;">Дата</th>
-                            </tr>
-                            </thead>
-                            <tbody id="ucg-preview-tbody">
-                            <tr><td colspan="5">Загружаем записи...</td></tr>
-                            </tbody>
-                        </table>
+                    <div id="ucg-step2-create-wrap" hidden>
+                        <label class="ucg-field">
+                            <span>Список тем</span>
+                            <textarea
+                                id="ucg-create-topics"
+                                rows="10"
+                                placeholder="Каждая строка — отдельная запись или товар, который нужно создать"
+                            ></textarea>
+                        </label>
+                        <p class="ucg-muted" id="ucg-step2-create-topics-note">
+                            По одной теме на строку. Количество строк определяет, сколько элементов будет создано.
+                        </p>
                     </div>
 
-                    <div class="ucg-pagination-wrap ucg-step2-footer">
-                        <div class="ucg-mini-pagination" id="ucg-preview-pagination"></div>
-                        <span class="ucg-muted ucg-step2-footer__selected">Выбрано вручную: <strong id="ucg-selected-count">0</strong></span>
+                    <div id="ucg-step2-update-wrap">
+                        <div class="ucg-step2-head">
+                            <div class="ucg-step2-head__meta">
+                                <h3 class="ucg-launch-card-title">Фильтры</h3>
+                                <p class="ucg-muted">Необязательно. Без фильтров показываем все записи выбранного типа.</p>
+                            </div>
+                            <div class="ucg-step2-head__actions">
+                                <button type="button" class="button" id="ucg-add-filter-row">+ Добавить фильтр</button>
+                                <button type="button" class="button button-primary" id="ucg-preview-posts">Обновить список</button>
+                            </div>
+                        </div>
+
+                        <div id="ucg-filter-rows" class="ucg-filter-rows ucg-step2-filter-rows"></div>
+
+                        <div class="ucg-step2-stats">
+                            <span class="ucg-step2-stat ucg-step2-stat--found">Найдено: <strong id="ucg-preview-found-count">0</strong></span>
+                            <span class="ucg-step2-stats__divider" aria-hidden="true"></span>
+                            <span class="ucg-step2-stat ucg-step2-stat--selected">Выбрано: <strong id="ucg-preview-selected-count">0</strong></span>
+                            <span class="screen-reader-text" id="ucg-preview-summary">Загружаем записи выбранного типа...</span>
+                        </div>
+
+                        <div class="ucg-selection-mode ucg-step2-mode">
+                            <div class="ucg-step2-mode__seg" role="radiogroup" aria-label="Режим выбора записей">
+                                <label class="ucg-step2-mode__option">
+                                    <input type="radio" name="ucg-selection-mode" value="selected" checked>
+                                    <span>Выбрать вручную</span>
+                                </label>
+                                <label class="ucg-step2-mode__option">
+                                    <input type="radio" name="ucg-selection-mode" value="filtered">
+                                    <span>Все найденные (<strong id="ucg-selection-mode-filtered-total">0</strong>)</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="ucg-preview-table-wrap ucg-step2-table-wrap">
+                            <table class="widefat striped">
+                                <thead>
+                                <tr>
+                                    <th style="width:45px;"><input type="checkbox" id="ucg-preview-select-page"></th>
+                                    <th style="width:80px;">ID</th>
+                                    <th>Заголовок</th>
+                                    <th style="width:140px;">Статус</th>
+                                    <th style="width:190px;">Дата</th>
+                                </tr>
+                                </thead>
+                                <tbody id="ucg-preview-tbody">
+                                <tr><td colspan="5">Загружаем записи...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="ucg-pagination-wrap ucg-step2-footer">
+                            <div class="ucg-mini-pagination" id="ucg-preview-pagination"></div>
+                            <span class="ucg-muted ucg-step2-footer__selected">Выбрано вручную: <strong id="ucg-selected-count">0</strong></span>
+                        </div>
                     </div>
 
                 </div>
@@ -299,7 +382,15 @@ $header_hide_mark = true;
 
                                 <label class="ucg-field ucg-launch-model-field">
                                     <span>Модель</span>
-                                    <select id="ucg-wizard-model" class="ucg-enhanced-select" data-search-enabled="false">
+                                    <select
+                                        id="ucg-wizard-model"
+                                        class="ucg-enhanced-select"
+                                        data-search-enabled="true"
+                                        data-search-in-dropdown="true"
+                                        data-search-placeholder="Поиск модели..."
+                                        data-search-fields="text,value"
+                                        data-max-options="1000"
+                                    >
                                         <option value="auto">По умолчанию</option>
                                     </select>
                                 </label>
@@ -320,14 +411,6 @@ $header_hide_mark = true;
                                         <option value="neutral">Нейтральный</option>
                                         <option value="official">Официальный</option>
                                         <option value="friendly">Дружелюбный</option>
-                                    </select>
-                                </label>
-                                <label class="ucg-field">
-                                    <span>Уникальность</span>
-                                    <select id="ucg-wizard-uniqueness" class="ucg-enhanced-select" data-search-enabled="false">
-                                        <option value="low">Низкая</option>
-                                        <option value="medium">Средняя</option>
-                                        <option value="high">Высокая</option>
                                     </select>
                                 </label>
                             </div>
@@ -406,7 +489,7 @@ $header_hide_mark = true;
                             </div>
                         </div>
 
-                        <div class="ucg-card ucg-launch-prompt">
+                        <div class="ucg-card ucg-launch-prompt" id="ucg-template-prompt-card">
                             <h3 class="ucg-launch-card-title ucg-launch-card-title--with-help">
                                 Промпт
                                 <button
@@ -436,7 +519,41 @@ $header_hide_mark = true;
                                     </label>
                                 </div>
                             </div>
+                        </div>
 
+                        <div id="ucg-template-body-multi-wrap" class="ucg-launch-multi-wrap" hidden>
+                            <div class="ucg-multi-field-builder">
+                                <div class="ucg-multi-field-builder__ai-col">
+                                    <section class="ucg-multi-field-section">
+                                        <div class="ucg-multi-field-section__head">
+                                            <h4>AI-поля</h4>
+                                            <p class="ucg-muted"><span id="ucg-ai-field-enabled-count">0</span> включено</p>
+                                        </div>
+                                        <div id="ucg-ai-field-rows" class="ucg-multi-field-rows"></div>
+                                    </section>
+
+                                    <section class="ucg-multi-field-section" id="ucg-seo-field-section" hidden>
+                                        <div class="ucg-multi-field-section__head">
+                                            <h4>SEO</h4>
+                                            <p class="ucg-muted"><span id="ucg-seo-field-enabled-count">0</span> включено</p>
+                                        </div>
+                                        <div id="ucg-seo-field-rows" class="ucg-multi-field-rows"></div>
+                                    </section>
+                                </div>
+
+                                <div class="ucg-multi-field-builder__static-col">
+                                    <section class="ucg-multi-field-section">
+                                        <div class="ucg-multi-field-section__head">
+                                            <h4>Заполнить автоматически</h4>
+                                            <p class="ucg-muted"><span id="ucg-static-field-enabled-count">0</span> включено</p>
+                                        </div>
+                                        <div id="ucg-static-field-rows" class="ucg-multi-field-rows"></div>
+                                    </section>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="ucg-card ucg-launch-token-card" id="ucg-template-token-card">
                             <div class="ucg-token-panel">
                                 <div class="ucg-token-panel__head">
                                     <div class="ucg-token-panel__title">
@@ -456,6 +573,9 @@ $header_hide_mark = true;
                                         <input type="search" id="ucg-wizard-token-search" placeholder="Поиск переменной...">
                                     </label>
                                 </div>
+                                <p class="ucg-muted" id="ucg-create-mode-token-warning" hidden>
+                                    Режим создания новых записей: переменные записи (<code>{post_*}</code>, <code>{tax:*}</code>, <code>{meta:*}</code>, <code>{acf:*}</code>) недоступны.
+                                </p>
                                 <div class="ucg-token-groups" id="ucg-wizard-tokens"></div>
                             </div>
                         </div>
@@ -465,7 +585,7 @@ $header_hide_mark = true;
                                 <strong>Пример результата</strong>
                                 <span class="ucg-muted" id="ucg-example-credits"></span>
                             </div>
-                            <textarea id="ucg-example-output" class="large-text code" rows="8" readonly></textarea>
+                            <div id="ucg-example-output" class="ucg-example-output" aria-live="polite"></div>
                         </div>
                     </div>
 
@@ -487,5 +607,8 @@ $header_hide_mark = true;
         <div id="ucg-toast-stack" class="ucg-toast-stack" aria-live="polite" aria-atomic="false"></div>
 
         <script type="application/json" id="ucg-wizard-initial"><?php echo wp_json_encode($wizard_schema); ?></script>
+        <?php if (!empty($wizard_prefill) && is_array($wizard_prefill)) : ?>
+            <script type="application/json" id="ucg-wizard-prefill"><?php echo wp_json_encode($wizard_prefill); ?></script>
+        <?php endif; ?>
     <?php endif; ?>
 </div>

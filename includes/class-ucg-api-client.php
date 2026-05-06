@@ -97,7 +97,7 @@ if (!class_exists('UCG_Api_Client')) {
                     continue;
                 }
 
-                $value = isset($item['id']) ? sanitize_key((string) $item['id']) : '';
+                $value = $this->normalize_model_identifier(isset($item['id']) ? (string) $item['id'] : '');
                 $label = isset($item['name']) ? trim((string) $item['name']) : '';
                 if ($value === '' || $label === '') {
                     continue;
@@ -112,18 +112,42 @@ if (!class_exists('UCG_Api_Client')) {
                     $normalized_estimated[$length_key] = max(0.0, (float) $credits);
                 }
 
+                $input_modalities = $this->normalize_model_modalities(
+                    isset($item['input_modalities']) ? $item['input_modalities'] : array('text'),
+                    array('text')
+                );
+                $output_modalities = $this->normalize_model_modalities(
+                    isset($item['output_modalities']) ? $item['output_modalities'] : array('text'),
+                    array('text')
+                );
+                $supported_parameters = $this->normalize_model_modalities(
+                    isset($item['supported_parameters']) ? $item['supported_parameters'] : array(),
+                    array()
+                );
+                $architecture_modality = isset($item['architecture_modality']) ? trim((string) $item['architecture_modality']) : '';
+                if ($architecture_modality === '') {
+                    $architecture_modality = implode('+', $input_modalities) . '->' . implode('+', $output_modalities);
+                }
+
                 $normalized_models[] = array(
                     'id' => $value,
                     'name' => $label,
                     'provider' => isset($item['provider']) ? trim((string) $item['provider']) : '',
                     'resolved_model' => isset($item['resolved_model']) ? trim((string) $item['resolved_model']) : '',
+                    'developer' => isset($item['developer']) ? trim((string) $item['developer']) : '',
+                    'developer_slug' => isset($item['developer_slug']) ? sanitize_key((string) $item['developer_slug']) : '',
+                    'architecture_modality' => $architecture_modality,
+                    'input_modalities' => $input_modalities,
+                    'output_modalities' => $output_modalities,
+                    'supported_parameters' => $supported_parameters,
+                    'context_length' => isset($item['context_length']) ? max(0, (int) $item['context_length']) : 0,
                     'is_default' => !empty($item['is_default']),
                     'estimated_credits_by_length' => $normalized_estimated,
                     'multiplier' => isset($item['multiplier']) ? max(0.1, (float) $item['multiplier']) : 1.0,
                 );
             }
 
-            $default_model = isset($response['default_model']) ? sanitize_key((string) $response['default_model']) : 'auto';
+            $default_model = $this->normalize_model_identifier(isset($response['default_model']) ? (string) $response['default_model'] : 'auto');
             if ($default_model === '') {
                 $default_model = 'auto';
             }
@@ -134,6 +158,65 @@ if (!class_exists('UCG_Api_Client')) {
                 'default_model' => $default_model,
                 'models' => $normalized_models,
             );
+        }
+
+        protected function normalize_model_identifier($value) {
+            $value = trim((string) $value);
+            if ($value === '') {
+                return '';
+            }
+
+            $value = sanitize_text_field($value);
+            $value = preg_replace('/[^A-Za-z0-9._:\\/-]/', '', (string) $value);
+            if (!is_string($value)) {
+                return '';
+            }
+            return trim($value);
+        }
+
+        protected function normalize_operation_type($value, $fallback = 'text') {
+            $value = sanitize_key((string) $value);
+            if (!in_array($value, array('text', 'seo_tags', 'long_text', 'image'), true)) {
+                $value = sanitize_key((string) $fallback);
+            }
+            if (!in_array($value, array('text', 'seo_tags', 'long_text', 'image'), true)) {
+                $value = 'text';
+            }
+            return $value;
+        }
+
+        protected function normalize_model_modalities($value, $fallback = array()) {
+            $fallback_values = array();
+            if (is_array($fallback)) {
+                foreach ($fallback as $fallback_item) {
+                    $fallback_value = sanitize_key((string) $fallback_item);
+                    if ($fallback_value !== '' && !in_array($fallback_value, $fallback_values, true)) {
+                        $fallback_values[] = $fallback_value;
+                    }
+                }
+            }
+
+            if (is_string($value)) {
+                $value = explode(',', $value);
+            }
+            if (!is_array($value)) {
+                return $fallback_values;
+            }
+
+            $result = array();
+            foreach ($value as $item) {
+                $item_value = strtolower(trim((string) $item));
+                $item_value = preg_replace('/[^a-z0-9_\\-+]/', '', $item_value);
+                if (!is_string($item_value) || $item_value === '' || in_array($item_value, $result, true)) {
+                    continue;
+                }
+                $result[] = $item_value;
+            }
+
+            if (!empty($result)) {
+                return $result;
+            }
+            return $fallback_values;
         }
 
         public function get_prompt_library($args = array()) {
@@ -264,7 +347,7 @@ if (!class_exists('UCG_Api_Client')) {
             );
         }
 
-        public function generate_text($prompt, $system_prompt = '', $max_tokens = 1500, $length_option_id = 0, $vary_length = false, $model = 'auto') {
+        public function generate_text($prompt, $system_prompt = '', $max_tokens = 1500, $length_option_id = 0, $vary_length = false, $model = 'auto', $operation_type = 'text') {
             $prompt = trim((string) $prompt);
             if ($prompt === '') {
                 return new WP_Error('ucg_empty_prompt', __('Пустой промпт.', 'unicontent-ai-generator'));
@@ -279,6 +362,7 @@ if (!class_exists('UCG_Api_Client')) {
                 'prompt' => $prompt,
                 'max_tokens' => max(1, min(4000, (int) $max_tokens)),
                 'model' => $model,
+                'operation_type' => $this->normalize_operation_type($operation_type, 'text'),
             );
 
             $system_prompt = trim((string) $system_prompt);
@@ -295,7 +379,180 @@ if (!class_exists('UCG_Api_Client')) {
             return $this->request('POST', '/generate', $body);
         }
 
-        protected function request($method, $path, $body = null) {
+        public function generate_multi_field($prompt, $system_prompt = '', $fields_spec = array(), $model = 'auto', $max_tokens = 1500, $operation_type = 'text') {
+            $prompt = trim((string) $prompt);
+            if ($prompt === '') {
+                return new WP_Error('ucg_empty_prompt', __('Пустой промпт.', 'unicontent-ai-generator'));
+            }
+
+            $model = trim((string) $model);
+            if ($model === '') {
+                $model = 'auto';
+            }
+
+            $normalized_fields = array();
+            if (is_array($fields_spec)) {
+                foreach ($fields_spec as $field) {
+                    if (!is_array($field)) {
+                        continue;
+                    }
+                    $key = sanitize_key(isset($field['key']) ? (string) $field['key'] : '');
+                    if ($key === '') {
+                        continue;
+                    }
+                    $normalized_fields[] = array(
+                        'key' => $key,
+                        'label' => sanitize_text_field(isset($field['label']) ? (string) $field['label'] : $key),
+                        'max_chars' => isset($field['max_chars']) ? max(0, (int) $field['max_chars']) : 0,
+                        'hint' => isset($field['hint']) ? sanitize_text_field((string) $field['hint']) : '',
+                        'required' => !array_key_exists('required', $field) || !empty($field['required']),
+                    );
+                }
+            }
+
+            if (empty($normalized_fields)) {
+                return new WP_Error('ucg_invalid_fields_spec', __('Не переданы поля для multi-field генерации.', 'unicontent-ai-generator'));
+            }
+
+            $body = array(
+                'prompt' => $prompt,
+                'max_tokens' => max(1, min(4000, (int) $max_tokens)),
+                'model' => $model,
+                'operation_type' => $this->normalize_operation_type($operation_type, 'text'),
+                'fields' => $normalized_fields,
+            );
+
+            $system_prompt = trim((string) $system_prompt);
+            if ($system_prompt !== '') {
+                $body['system_prompt'] = $system_prompt;
+            }
+
+            return $this->request('POST', '/generate', $body);
+        }
+
+        public function generate_image($prompt, $system_prompt = '', $model = 'auto', $images_count = 1, $aspect_ratio = '', $image_size = '', $operation_type = 'image') {
+            $prompt = trim((string) $prompt);
+            if ($prompt === '') {
+                return new WP_Error('ucg_empty_prompt', __('Пустой промпт.', 'unicontent-ai-generator'));
+            }
+
+            $model = trim((string) $model);
+            if ($model === '') {
+                $model = 'auto';
+            }
+
+            $images_count = max(1, min(8, (int) $images_count));
+
+            $body = array(
+                'prompt' => $prompt,
+                'model' => $model,
+                'images_count' => $images_count,
+                'operation_type' => $this->normalize_operation_type($operation_type, 'image'),
+            );
+
+            $system_prompt = trim((string) $system_prompt);
+            if ($system_prompt !== '') {
+                $body['system_prompt'] = $system_prompt;
+            }
+
+            $aspect_ratio = trim((string) $aspect_ratio);
+            if ($aspect_ratio !== '') {
+                $body['aspect_ratio'] = $aspect_ratio;
+            }
+
+            $image_size = trim((string) $image_size);
+            if ($image_size !== '') {
+                $body['image_size'] = $image_size;
+            }
+
+            // Image generation can legitimately take longer than text requests.
+            // Timeout scales with number of requested images and selected size.
+            $image_timeout = 90 + (max(0, $images_count - 1) * 60);
+            $normalized_image_size = strtoupper($image_size);
+            if ($normalized_image_size === '2K') {
+                $image_timeout += 30;
+            } elseif ($normalized_image_size === '4K') {
+                $image_timeout += 60;
+            }
+            $image_timeout = max(90, min(600, (int) $image_timeout));
+
+            return $this->request('POST', '/generate-image', $body, $image_timeout);
+        }
+
+        public function create_pricing_quote($params = array()) {
+            $params = is_array($params) ? $params : array();
+
+            $operation_type = $this->normalize_operation_type(
+                isset($params['operation_type']) ? (string) $params['operation_type'] : 'text',
+                'text'
+            );
+            $model = $this->normalize_model_identifier(isset($params['model']) ? (string) $params['model'] : 'auto');
+            if ($model === '') {
+                $model = 'auto';
+            }
+
+            $body = array(
+                'operation_type' => $operation_type,
+                'model' => $model,
+                'prompt' => isset($params['prompt']) ? (string) $params['prompt'] : '',
+                'max_tokens' => max(1, min(4000, isset($params['max_tokens']) ? (int) $params['max_tokens'] : 1500)),
+                'images_count' => max(1, min(8, isset($params['images_count']) ? (int) $params['images_count'] : 1)),
+                'vary_length' => !empty($params['vary_length']),
+                'create_hold' => !empty($params['create_hold']),
+                'ttl_seconds' => max(60, min(3600, isset($params['ttl_seconds']) ? (int) $params['ttl_seconds'] : 600)),
+            );
+
+            $aspect_ratio = trim((string) (isset($params['aspect_ratio']) ? $params['aspect_ratio'] : ''));
+            if ($aspect_ratio !== '') {
+                $body['aspect_ratio'] = $aspect_ratio;
+            }
+
+            $image_size = strtoupper(trim((string) (isset($params['image_size']) ? $params['image_size'] : '')));
+            if (in_array($image_size, array('0.5K', '1K', '2K', '4K'), true)) {
+                $body['image_size'] = $image_size;
+            }
+
+            $length_option_id = isset($params['length_option_id']) ? (int) $params['length_option_id'] : 0;
+            if ($length_option_id > 0) {
+                $body['length_option_id'] = $length_option_id;
+            }
+
+            $fields = isset($params['fields']) && is_array($params['fields']) ? $params['fields'] : array();
+            if (!empty($fields)) {
+                $normalized_fields = array();
+                foreach ($fields as $field) {
+                    if (!is_array($field)) {
+                        continue;
+                    }
+                    $key = sanitize_key(isset($field['key']) ? (string) $field['key'] : '');
+                    if ($key === '') {
+                        continue;
+                    }
+                    $normalized_fields[] = array(
+                        'key' => $key,
+                        'label' => sanitize_text_field(isset($field['label']) ? (string) $field['label'] : $key),
+                        'max_chars' => isset($field['max_chars']) ? max(0, min(10000, (int) $field['max_chars'])) : 0,
+                        'hint' => isset($field['hint']) ? sanitize_text_field((string) $field['hint']) : '',
+                        'required' => !array_key_exists('required', $field) || !empty($field['required']),
+                    );
+                }
+                if (!empty($normalized_fields)) {
+                    $body['fields'] = $normalized_fields;
+                }
+            }
+
+            // Quote is a UI helper. Keep timeout lower than generation requests
+            // so the wizard can quickly fall back to local estimate.
+            $quote_timeout = 20;
+            $settings = UCG_Settings::get();
+            if (isset($settings['request_timeout'])) {
+                $quote_timeout = max(10, min(30, (int) $settings['request_timeout']));
+            }
+
+            return $this->request('POST', '/pricing/quote', $body, $quote_timeout);
+        }
+
+        protected function request($method, $path, $body = null, $timeout_override = null) {
             $settings = UCG_Settings::get();
             $api_key = $this->override_api_key !== '' ? $this->override_api_key : (isset($settings['api_key']) ? trim((string) $settings['api_key']) : '');
             if ($api_key === '') {
@@ -308,10 +565,13 @@ if (!class_exists('UCG_Api_Client')) {
             $base = $this->override_base_url !== '' ? rtrim($this->override_base_url, '/') : UCG_Settings::get_api_base_url();
             $url = $base . '/api/v1' . $path;
             $timeout = isset($settings['request_timeout']) ? (int) $settings['request_timeout'] : 60;
+            if (is_numeric($timeout_override)) {
+                $timeout = (int) $timeout_override;
+            }
 
             $args = array(
                 'method' => strtoupper((string) $method),
-                'timeout' => max(10, min(180, $timeout)),
+                'timeout' => max(10, min(600, $timeout)),
                 'headers' => array(
                     'Content-Type' => 'application/json',
                     'Accept' => 'application/json',
@@ -351,6 +611,7 @@ if (!class_exists('UCG_Api_Client')) {
 
             $message = $this->extract_error_message($data, $raw_body);
             if (class_exists('UCG_Logger')) {
+                $body_snippet = $this->build_http_error_body_snippet($raw_body);
                 UCG_Logger::warn(
                     'api',
                     'http_error',
@@ -360,10 +621,26 @@ if (!class_exists('UCG_Api_Client')) {
                         'path' => (string) $path,
                         'status_code' => $status_code,
                         'message' => (string) $message,
+                        'body_snippet' => $body_snippet,
                     )
                 );
             }
             return new WP_Error('ucg_api_http_' . $status_code, $message, array('status_code' => $status_code, 'response' => $data));
+        }
+
+        protected function build_http_error_body_snippet($raw_body) {
+            $raw_body = trim((string) $raw_body);
+            if ($raw_body === '') {
+                return '';
+            }
+            $raw_body = preg_replace('/\s+/', ' ', $raw_body);
+            if (!is_string($raw_body)) {
+                return '';
+            }
+            if (strlen($raw_body) > 800) {
+                return substr($raw_body, 0, 800) . '...';
+            }
+            return $raw_body;
         }
 
         protected function extract_error_message($data, $raw_body) {
@@ -373,11 +650,11 @@ if (!class_exists('UCG_Api_Client')) {
                 }
 
                 if (isset($data['detail']) && is_array($data['detail'])) {
-                    if (!empty($data['detail']['error'])) {
-                        return (string) $data['detail']['error'];
-                    }
                     if (!empty($data['detail']['message'])) {
                         return (string) $data['detail']['message'];
+                    }
+                    if (!empty($data['detail']['error'])) {
+                        return (string) $data['detail']['error'];
                     }
                 }
 

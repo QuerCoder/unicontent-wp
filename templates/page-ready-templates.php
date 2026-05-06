@@ -1,4 +1,4 @@
-<div class="wrap ucg-wrap">
+<div class="wrap ucg-wrap ucg-flat-ui">
     <?php $this->render_admin_notice(); ?>
     <?php include UCG_PLUGIN_DIR . 'templates/partials/plugin-header.php'; ?>
 

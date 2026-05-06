@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UNICONTENT AI Content Generator
  * Description: Generates product descriptions, SEO meta tags, and content for WordPress posts with bulk processing support.
- * Version: 0.2.9.22
+ * Version: 0.2.9.23
  * Author: UNICONTENT
  * Author URI: https://unicontent.net
  * Requires at least: 5.8
@@ -40,6 +40,7 @@ require_once UCG_PLUGIN_DIR . 'includes/class-ucg-i18n.php';
 require_once UCG_PLUGIN_DIR . 'includes/class-ucg-db.php';
 require_once UCG_PLUGIN_DIR . 'includes/class-ucg-api-client.php';
 require_once UCG_PLUGIN_DIR . 'includes/class-ucg-logger.php';
+require_once UCG_PLUGIN_DIR . 'includes/class-ucg-media.php';
 require_once UCG_PLUGIN_DIR . 'includes/class-ucg-tokens.php';
 require_once UCG_PLUGIN_DIR . 'includes/class-ucg-generator.php';
 require_once UCG_PLUGIN_DIR . 'includes/class-ucg-admin.php';

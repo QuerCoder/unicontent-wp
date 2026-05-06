@@ -1,12 +1,12 @@
 <?php $has_api_key = $masked_api_key !== ''; ?>
-<div class="wrap ucg-wrap">
+<div class="wrap ucg-wrap ucg-flat-ui">
     <?php $this->render_admin_notice(); ?>
     <?php include UCG_PLUGIN_DIR . 'templates/partials/plugin-header.php'; ?>
 
     <div class="ucg-hero">
         <div>
             <h1>UNICONTENT — AI генератор контента</h1>
-            <p>Сначала добавьте API ключ из личного кабинета, затем запускайте генерацию в пару шагов.</p>
+            <p id="ucg-dashboard-key-hint" <?php if ($has_api_key) : ?>hidden<?php endif; ?>>Сначала добавьте API ключ из личного кабинета, затем запускайте генерацию в пару шагов.</p>
         </div>
         <div class="ucg-hero__actions">
             <a href="<?php echo esc_url(admin_url('admin.php?page=ucg-generate')); ?>" class="button button-primary">Новый запуск</a>
@@ -51,7 +51,6 @@
                 <strong class="ucg-balance-value">—</strong>
                 <button type="button" class="button ucg-btn ucg-btn--ghost" id="ucg-refresh-balance">Обновить</button>
             </div>
-            <div id="ucg-api-status" class="ucg-api-status" aria-live="polite"></div>
             <div class="ucg-actions-row ucg-actions-row--footer">
                 <button type="button" class="button ucg-btn ucg-btn--primary" id="ucg-save-api-key" <?php if ($has_api_key) : ?>style="display:none;"<?php endif; ?>>Сохранить</button>
             </div>

@@ -141,8 +141,25 @@ jQuery(function ($) {
         });
     }
 
+    let $globalStatusContainer = $();
+
+    function getGlobalStatusContainer() {
+        if ($globalStatusContainer && $globalStatusContainer.length && $globalStatusContainer.closest(document.documentElement).length) {
+            return $globalStatusContainer;
+        }
+
+        $globalStatusContainer = $('#ucg-global-status-stack');
+        if ($globalStatusContainer.length) {
+            return $globalStatusContainer;
+        }
+
+        $globalStatusContainer = $('<div id="ucg-global-status-stack" aria-live="polite" aria-atomic="false"></div>');
+        $('body').append($globalStatusContainer);
+        return $globalStatusContainer;
+    }
+
     function setApiStatus(message, isError) {
-        const $status = $('#ucg-api-status');
+        const $status = getGlobalStatusContainer();
         if (!$status.length) {
             return;
         }
@@ -249,6 +266,7 @@ jQuery(function ($) {
         const $saveButton = $('#ucg-save-api-key');
         const $deleteButton = $('#ucg-delete-api-key');
         const $currentKey = $('#ucg-current-key');
+        const $dashboardKeyHint = $('#ucg-dashboard-key-hint');
         if (!$input.length) {
             return;
         }
@@ -262,6 +280,9 @@ jQuery(function ($) {
             $input.attr('placeholder', jsT('Ключ сохранён'));
             $saveButton.hide();
             $deleteButton.show();
+            if ($dashboardKeyHint.length) {
+                $dashboardKeyHint.prop('hidden', true);
+            }
             if ($currentKey.length) {
                 $currentKey.text(nextMasked || jsT('скрыт'));
             }
@@ -273,6 +294,9 @@ jQuery(function ($) {
         $input.attr('placeholder', jsT('Вставьте API ключ'));
         $saveButton.show();
         $deleteButton.hide();
+        if ($dashboardKeyHint.length) {
+            $dashboardKeyHint.prop('hidden', false);
+        }
         if ($currentKey.length) {
             $currentKey.text(jsT('не задан'));
         }
@@ -400,25 +424,108 @@ jQuery(function ($) {
         });
     }
 
-    function renderTokenButtons($container, tokens) {
+    function renderTokenButtons($container, tokens, searchQuery) {
         if (!$container.length) {
             return;
         }
 
-            if (!Array.isArray(tokens) || !tokens.length) {
-                $container.html(jsT('<p class="ucg-muted">Переменные не найдены.</p>'));
-                return;
-            }
+        const sourceTokens = Array.isArray(tokens) ? tokens : [];
+        if (!sourceTokens.length) {
+            $container.html(jsT('<p class="ucg-muted">Переменные не найдены.</p>'));
+            return;
+        }
 
-        let html = '';
-        tokens.forEach(function (item) {
+        const query = String(searchQuery || '').trim().toLowerCase();
+        const groups = {
+            main: [],
+            taxonomy: [],
+            meta: []
+        };
+
+        function tokenGroupKey(token) {
+            const normalized = String(token || '').toLowerCase();
+            if (normalized.indexOf('{tax:') === 0) {
+                return 'taxonomy';
+            }
+            if (normalized.indexOf('{meta:') === 0 || normalized.indexOf('{acf:') === 0) {
+                return 'meta';
+            }
+            return 'main';
+        }
+
+        function tokenGroupTitle(groupKey) {
+            if (groupKey === 'taxonomy') {
+                return jsT('Таксономии');
+            }
+            if (groupKey === 'meta') {
+                return jsT('Meta-поля');
+            }
+            return jsT('Основные');
+        }
+
+        function compactTokenText(token) {
+            const raw = String(token || '');
+            if (raw.length <= 32) {
+                return raw;
+            }
+            return raw.slice(0, 14) + '…' + raw.slice(-14);
+        }
+
+        sourceTokens.forEach(function (item) {
             const token = item && item.token ? String(item.token) : '';
             const label = item && item.label ? String(item.label) : token;
             if (!token) {
                 return;
             }
-            html += '<button type="button" class="ucg-token-btn" draggable="true" data-token="' + escapeHtml(token) + '" title="' + escapeHtml(label) + '">' + escapeHtml(token) + '</button>';
+
+            if (query) {
+                const haystack = (token + ' ' + label).toLowerCase();
+                if (haystack.indexOf(query) === -1) {
+                    return;
+                }
+            }
+
+            const groupKey = tokenGroupKey(token);
+            if (!Object.prototype.hasOwnProperty.call(groups, groupKey)) {
+                groups.main.push({ token: token, label: label });
+                return;
+            }
+            groups[groupKey].push({ token: token, label: label });
         });
+
+        const orderedGroups = ['main', 'taxonomy', 'meta'];
+        let totalVisible = 0;
+        let html = '';
+
+        orderedGroups.forEach(function (groupKey) {
+            const items = groups[groupKey];
+            if (!Array.isArray(items) || !items.length) {
+                return;
+            }
+            totalVisible += items.length;
+
+            let buttonsHtml = '';
+            items.forEach(function (item) {
+                const token = String(item.token || '');
+                const label = String(item.label || token);
+                const displayToken = compactTokenText(token);
+                buttonsHtml += '' +
+                    '<button type="button" class="ucg-token-btn" draggable="true" data-token="' + escapeHtml(token) + '" title="' + escapeHtml(label) + '" aria-label="' + escapeHtml(label) + '">' +
+                    '<span class="ucg-token-btn__text">' + escapeHtml(displayToken) + '</span>' +
+                    '</button>';
+            });
+
+            html += '' +
+                '<details class="ucg-token-group" open>' +
+                '  <summary>' + escapeHtml(tokenGroupTitle(groupKey)) + ' <span class="ucg-token-group__count">' + items.length + '</span></summary>' +
+                '  <div class="ucg-token-grid">' + buttonsHtml + '</div>' +
+                '</details>';
+        });
+
+        if (!totalVisible) {
+            $container.html(jsT('<p class="ucg-muted">Переменные не найдены.</p>'));
+            return;
+        }
 
         $container.html(html);
     }
@@ -436,6 +543,36 @@ jQuery(function ($) {
             return false;
         }
         return !!defaultValue;
+    }
+
+    function parseSearchFieldsAttr(rawValue, fallbackFields) {
+        const fallback = Array.isArray(fallbackFields) ? fallbackFields.slice() : [];
+        const source = String(rawValue == null ? '' : rawValue).trim();
+        if (!source) {
+            return fallback;
+        }
+
+        const fields = [];
+        const seen = new Set();
+        source.split(',').forEach(function (token) {
+            const field = String(token || '').trim();
+            if (!field || !/^[A-Za-z0-9_.-]+$/.test(field) || seen.has(field)) {
+                return;
+            }
+            seen.add(field);
+            fields.push(field);
+        });
+
+        return fields.length ? fields : fallback;
+    }
+
+    function escapeHtmlAttr(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
     }
 
     function setEnhancedSelectValue($select, value) {
@@ -502,6 +639,9 @@ jQuery(function ($) {
             }
 
             const searchEnabled = isTruthyAttr($select.attr('data-search-enabled'), false);
+            const searchInDropdown = isTruthyAttr($select.attr('data-search-in-dropdown'), false);
+            const configuredSearchFields = parseSearchFieldsAttr($select.attr('data-search-fields'), []);
+            const searchPlaceholder = String($select.attr('data-search-placeholder') || '').trim();
             const placeholder = String($select.attr('data-placeholder') || '').trim();
             const maxOptionsRaw = Number($select.attr('data-max-options'));
             const maxOptions = Number.isFinite(maxOptionsRaw) && maxOptionsRaw > 0 ? Math.round(maxOptionsRaw) : 200;
@@ -528,7 +668,12 @@ jQuery(function ($) {
                 config.controlInput = null;
                 config.plugins = [];
             } else {
-                config.searchField = ['text'];
+                config.searchField = configuredSearchFields.length ? configuredSearchFields : ['text'];
+                if (searchInDropdown) {
+                    const dropdownSearchPlaceholder = searchPlaceholder || jsT('Поиск...');
+                    config.plugins = ['dropdown_input'];
+                    config.controlInput = '<input type="text" autocomplete="off" size="1" placeholder="' + escapeHtmlAttr(dropdownSearchPlaceholder) + '">';
+                }
             }
 
             const ajaxEnabled = isTruthyAttr($select.attr('data-ajax-enabled'), false);
@@ -550,7 +695,9 @@ jQuery(function ($) {
                 if (ajaxUrl && ajaxAction) {
                     config.valueField = valueField;
                     config.labelField = labelField;
-                    config.searchField = searchEnabled ? [searchField] : [];
+                    config.searchField = searchEnabled
+                        ? (configuredSearchFields.length ? configuredSearchFields : [searchField])
+                        : [];
                     config.preload = preloadEnabled;
                     config.loadThrottle = loadThrottle;
                     config.shouldLoad = function (query) {
@@ -608,10 +755,19 @@ jQuery(function ($) {
     function initTemplatesPage() {
         const $templatePostType = $('#ucg-template-post-type');
         const $templateScenario = $('#ucg-template-scenario');
+        const $templateForm = $templateScenario.length ? $templateScenario.closest('form') : $();
         const $tokensContainer = $('#ucg-template-tokens');
+        const $templateTokenSearch = $('#ucg-template-token-search');
         const $templateBody = $('#ucg-template-body');
+        const $templateSimpleEditor = $('#ucg-template-simple-editor');
+        const $templateSimplePrompt = $('#ucg-template-simple-prompt');
+        const $templateBlockEditor = $('#ucg-template-block-editor');
         const $templateBlockRows = $('#ucg-template-block-rows');
         const $addPromptBlock = $('#ucg-add-prompt-block');
+        const $templateFieldsEditor = $('#ucg-template-fields-editor');
+        const $templateFieldRows = $('#ucg-template-field-rows');
+        const $addTemplateField = $('#ucg-add-template-field');
+        const $templateFieldsJson = $('#ucg-template-fields-json');
         const $templateName = $('input[name="name"]');
         const $readyTypeFilter = $('#ucg-ready-type-filter');
         const $readyCards = $('.ucg-ready-card');
@@ -627,11 +783,19 @@ jQuery(function ($) {
             types: Array.isArray(promptLibraryData.types) ? promptLibraryData.types : [],
             prompts: Array.isArray(promptLibraryData.prompts) ? promptLibraryData.prompts : []
         };
+        const templateFieldsData = parseJsonScript('#ucg-template-fields-data', {});
+        const templateFieldPresets = templateFieldsData && typeof templateFieldsData === 'object' && templateFieldsData.presets && typeof templateFieldsData.presets === 'object'
+            ? templateFieldsData.presets
+            : {};
+        const templateLengthOptions = Array.isArray(templateFieldsData.length_options) ? templateFieldsData.length_options : [];
+        const templateDefaultLengthOptionId = Number(templateFieldsData.default_length_option_id || 0);
         let $activeTemplateInput = $templateBody;
+        let templateTokensSource = [];
 
         if (
             !$tokensContainer.length &&
             !$templateBody.length &&
+            !$templateFieldsEditor.length &&
             !$templateBlockRows.length &&
             !$readyTypeFilter.length &&
             !$readyCards.length
@@ -639,15 +803,397 @@ jQuery(function ($) {
             return;
         }
 
+        function isFieldEditorScenario(scenario) {
+            const normalized = String(scenario || '').trim().toLowerCase();
+            return normalized === 'seo_tags' || normalized === 'post_fields' || normalized === 'product_fields';
+        }
+
+        function isBlockEditorScenario(scenario) {
+            const normalized = String(scenario || '').trim().toLowerCase();
+            return normalized === 'field_update';
+        }
+
+        function isSimplePromptScenario(scenario) {
+            return !isFieldEditorScenario(scenario) && !isBlockEditorScenario(scenario);
+        }
+
+        function normalizeTargetFieldByKey(key) {
+            const normalized = String(key || '').trim().toLowerCase();
+            const map = {
+                post_title: 'post:post_title',
+                post_content: 'post:post_content',
+                post_excerpt: 'post:post_excerpt',
+                seo_title: 'seo_field:title',
+                seo_description: 'seo_field:description',
+                title: 'seo_field:title',
+                description: 'seo_field:description',
+                post_author: 'post:post_author',
+                post_date: 'post:post_date'
+            };
+            if (Object.prototype.hasOwnProperty.call(map, normalized)) {
+                return map[normalized];
+            }
+            if (normalized.indexOf('post_') === 0) {
+                return 'post:' + normalized;
+            }
+            if (normalized.indexOf('meta_') === 0) {
+                return 'meta:' + normalized.substring(5);
+            }
+            if (normalized.indexOf('tax_') === 0) {
+                return 'tax:' + normalized.substring(4);
+            }
+            return '';
+        }
+
+        function sanitizeTemplateFieldKey(value, fallbackIndex) {
+            const normalized = String(value || '').trim().toLowerCase().replace(/[^a-z0-9_:-]+/g, '_').replace(/^_+|_+$/g, '');
+            if (normalized) {
+                return normalized;
+            }
+            return 'field_' + String(Number(fallbackIndex || 0) + 1);
+        }
+
+        function sanitizeTemplateFieldTarget(value, key) {
+            const normalized = String(value || '').trim().replace(/[^a-zA-Z0-9:_-]+/g, '');
+            if (normalized) {
+                return normalized;
+            }
+            return normalizeTargetFieldByKey(key);
+        }
+
+        function fieldPresetRowsForScenario(scenario) {
+            const normalizedScenario = String(scenario || '').trim().toLowerCase();
+            const preset = templateFieldPresets && Array.isArray(templateFieldPresets[normalizedScenario])
+                ? templateFieldPresets[normalizedScenario]
+                : [];
+            return preset.map(function (row) {
+                return row && typeof row === 'object' ? row : {};
+            });
+        }
+
+        function buildLengthOptionsHtml(selectedId) {
+            const selected = Number(selectedId || 0);
+            let html = '<option value="0">' + escapeHtml(jsT('По умолчанию')) + '</option>';
+            templateLengthOptions.forEach(function (option) {
+                if (!option || typeof option !== 'object') {
+                    return;
+                }
+                const optionId = Number(option.id || 0);
+                if (!optionId) {
+                    return;
+                }
+                const optionName = String(option.name || ('#' + optionId));
+                const credits = Number(option.credits_cost || 0);
+                const creditsLabel = credits > 0 ? (' (' + String(credits).replace(/\.0+$/, '') + ' ' + jsT('кр.') + ')') : '';
+                const isSelected = selected === optionId ? ' selected' : '';
+                html += '<option value="' + optionId + '"' + isSelected + '>' + escapeHtml(optionName + creditsLabel) + '</option>';
+            });
+            return html;
+        }
+
+        function buildTemplateFieldRow(index, row) {
+            const safeIndex = Number(index || 0);
+            const source = row && typeof row === 'object' ? row : {};
+            const fallbackLength = templateDefaultLengthOptionId > 0 ? templateDefaultLengthOptionId : 0;
+            const safeKey = sanitizeTemplateFieldKey(source.key || '', safeIndex);
+            const safeLabel = String(source.label || '');
+            const safePrompt = String(source.prompt || '');
+            const safeTarget = sanitizeTemplateFieldTarget(source.target_field || '', safeKey);
+            let safeLengthId = Number(source.length_option_id || 0);
+            if (safeLengthId <= 0) {
+                safeLengthId = fallbackLength;
+            }
+            const safeMaxChars = Math.max(0, Number(source.max_chars || 0));
+            const isEnabled = !Object.prototype.hasOwnProperty.call(source, 'enabled') || !!source.enabled;
+            const checked = isEnabled ? ' checked' : '';
+
+            return '' +
+                '<div class="ucg-template-field-row ucg-template-block-row" data-index="' + safeIndex + '">' +
+                '  <label class="ucg-field">' +
+                '    <span>' + escapeHtml(jsT('Название поля')) + '</span>' +
+                '    <input type="text" class="ucg-template-field-label" value="' + escapeHtml(safeLabel) + '" placeholder="' + escapeHtml(jsT('Например: Заголовок')) + '">' +
+                '  </label>' +
+                '  <div class="ucg-grid-3 ucg-template-field-row__meta-grid">' +
+                '    <label class="ucg-field">' +
+                '      <span>' + escapeHtml(jsT('Длина')) + '</span>' +
+                '      <select class="ucg-template-field-length ucg-enhanced-select" data-search-enabled="false" data-placeholder="' + escapeHtml(jsT('По умолчанию')) + '">' +
+                buildLengthOptionsHtml(safeLengthId) +
+                '      </select>' +
+                '    </label>' +
+                '    <label class="ucg-field">' +
+                '      <span>' + escapeHtml(jsT('Макс. символов (опц.)')) + '</span>' +
+                '      <input type="number" min="0" step="1" class="ucg-template-field-max-chars" value="' + safeMaxChars + '" placeholder="0">' +
+                '    </label>' +
+                '    <label class="ucg-checkbox ucg-template-field-enabled-wrap">' +
+                '      <input type="checkbox" class="ucg-template-field-enabled"' + checked + '>' +
+                '      <span>' + escapeHtml(jsT('Поле включено')) + '</span>' +
+                '    </label>' +
+                '  </div>' +
+                '  <details class="ucg-template-field-advanced">' +
+                '    <summary>' + escapeHtml(jsT('Расширенные настройки')) + '</summary>' +
+                '    <div class="ucg-template-field-advanced__grid">' +
+                '      <label class="ucg-field">' +
+                '        <span>' + escapeHtml(jsT('Ключ поля')) + '</span>' +
+                '        <input type="text" class="ucg-template-field-key" value="' + escapeHtml(safeKey) + '" placeholder="' + escapeHtml(jsT('post_title / seo_title / custom')) + '">' +
+                '      </label>' +
+                '      <label class="ucg-field">' +
+                '        <span>' + escapeHtml(jsT('Целевое поле')) + '</span>' +
+                '        <input type="text" class="ucg-template-field-target" value="' + escapeHtml(safeTarget) + '" placeholder="' + escapeHtml(jsT('post:post_title / seo_field:title')) + '">' +
+                '      </label>' +
+                '    </div>' +
+                '  </details>' +
+                '  <label class="ucg-field">' +
+                '    <span>' + escapeHtml(jsT('Промпт поля')) + '</span>' +
+                '    <textarea class="ucg-template-field-prompt ucg-template-block-input" rows="6" placeholder="' + escapeHtml(jsT('Текст промпта для поля')) + '">' + escapeHtml(safePrompt) + '</textarea>' +
+                '  </label>' +
+                '  <div class="ucg-template-block-actions">' +
+                '    <button type="button" class="button button-small ucg-remove-template-field">' + escapeHtml(jsT('Удалить поле')) + '</button>' +
+                '  </div>' +
+                '</div>';
+        }
+
+        function nextTemplateFieldIndex() {
+            return $templateFieldRows.find('.ucg-template-field-row').length + 1;
+        }
+
+        function addTemplateFieldRow(row) {
+            if (!$templateFieldRows.length) {
+                return;
+            }
+            const index = nextTemplateFieldIndex();
+            $templateFieldRows.append(buildTemplateFieldRow(index, row || {}));
+            const $newRow = $templateFieldRows.find('.ucg-template-field-row').last();
+            initEnhancedSelects($newRow.find('.ucg-template-field-length'));
+        }
+
+        function templateFieldRowsHavePrompts() {
+            if (!$templateFieldRows.length) {
+                return false;
+            }
+            let hasPrompts = false;
+            $templateFieldRows.find('.ucg-template-field-row').each(function () {
+                const prompt = String($(this).find('.ucg-template-field-prompt').val() || '').trim();
+                if (prompt !== '') {
+                    hasPrompts = true;
+                    return false;
+                }
+                return true;
+            });
+            return hasPrompts;
+        }
+
+        function collectTemplateFieldsPayload() {
+            if (!$templateFieldRows.length) {
+                return [];
+            }
+            const payload = [];
+            $templateFieldRows.find('.ucg-template-field-row').each(function (rowIndex) {
+                const $row = $(this);
+                const rawKey = String($row.find('.ucg-template-field-key').val() || '').trim();
+                const rawLabel = String($row.find('.ucg-template-field-label').val() || '').trim();
+                const rawTarget = String($row.find('.ucg-template-field-target').val() || '').trim();
+                const rawPrompt = String($row.find('.ucg-template-field-prompt').val() || '');
+                if (!rawKey && !rawLabel && !rawTarget && String(rawPrompt || '').trim() === '') {
+                    return;
+                }
+                const key = sanitizeTemplateFieldKey(rawKey, rowIndex);
+                const targetField = sanitizeTemplateFieldTarget(rawTarget, key);
+                const lengthOptionId = Math.max(0, Number($row.find('.ucg-template-field-length').val() || 0));
+                const maxChars = Math.max(0, Number($row.find('.ucg-template-field-max-chars').val() || 0));
+                payload.push({
+                    key: key,
+                    label: rawLabel || key,
+                    type: 'ai',
+                    enabled: $row.find('.ucg-template-field-enabled').is(':checked'),
+                    length_option_id: lengthOptionId > 0 ? lengthOptionId : 0,
+                    max_chars: maxChars > 0 ? maxChars : 0,
+                    target_field: targetField || '',
+                    prompt: rawPrompt
+                });
+            });
+            return payload;
+        }
+
+        function ensureTemplateFieldPresetIfNeeded(force) {
+            if (!$templateFieldRows.length || !$templateScenario.length) {
+                return;
+            }
+            const scenario = String($templateScenario.val() || 'field_update');
+            if (!isFieldEditorScenario(scenario)) {
+                return;
+            }
+
+            const hasRows = $templateFieldRows.find('.ucg-template-field-row').length > 0;
+            if (!force && hasRows && templateFieldRowsHavePrompts()) {
+                return;
+            }
+
+            const presetRows = fieldPresetRowsForScenario(scenario);
+            if (!hasRows && !presetRows.length) {
+                addTemplateFieldRow({ key: 'field_1', label: jsT('Поле'), prompt: '' });
+                return;
+            }
+            if (!force && hasRows && !templateFieldRowsHavePrompts()) {
+                $templateFieldRows.empty();
+            } else if (force) {
+                $templateFieldRows.empty();
+            } else if (hasRows) {
+                return;
+            }
+
+            if (!presetRows.length) {
+                addTemplateFieldRow({ key: 'field_1', label: jsT('Поле'), prompt: '' });
+                return;
+            }
+            presetRows.forEach(function (row) {
+                addTemplateFieldRow(row);
+            });
+        }
+
+        function firstBlockPromptValue() {
+            if (!$templateBlockRows.length) {
+                return '';
+            }
+            const $first = $templateBlockRows.find('textarea[name="prompt_blocks_prompt[]"]').first();
+            return $first.length ? String($first.val() || '') : '';
+        }
+
+        function setFirstBlockPromptValue(value) {
+            if (!$templateBlockRows.length) {
+                return;
+            }
+            if (!$templateBlockRows.find('.ucg-template-block-row').length) {
+                addPromptBlockRow({ key: 'main', label: jsT('Основной промпт'), prompt: '' });
+            }
+            const $first = $templateBlockRows.find('textarea[name="prompt_blocks_prompt[]"]').first();
+            if ($first.length) {
+                $first.val(String(value || ''));
+            }
+        }
+
+        function syncSimplePromptFromBlocksIfEmpty() {
+            if (!$templateSimplePrompt.length) {
+                return;
+            }
+            const currentSimple = String($templateSimplePrompt.val() || '').trim();
+            if (currentSimple !== '') {
+                return;
+            }
+            const fromBlock = String(firstBlockPromptValue() || '');
+            if (fromBlock.trim() !== '') {
+                $templateSimplePrompt.val(fromBlock);
+            }
+        }
+
+        function syncBlockPromptFromSimpleIfEmpty() {
+            const simplePrompt = $templateSimplePrompt.length ? String($templateSimplePrompt.val() || '') : '';
+            if (simplePrompt.trim() === '') {
+                return;
+            }
+            const blockPrompt = String(firstBlockPromptValue() || '').trim();
+            if (blockPrompt !== '') {
+                return;
+            }
+            setFirstBlockPromptValue(simplePrompt);
+        }
+
+        function setBlockPromptInputsEnabled(enabled) {
+            if (!$templateBlockEditor.length) {
+                return;
+            }
+            const isEnabled = !!enabled;
+            $templateBlockEditor
+                .find('input[name^="prompt_blocks_"], textarea[name^="prompt_blocks_"]')
+                .prop('disabled', !isEnabled);
+        }
+
+        function removeSimplePromptHiddenFields() {
+            if (!$templateForm.length) {
+                return;
+            }
+            $templateForm.find('.ucg-simple-prompt-hidden').remove();
+        }
+
+        function appendSimplePromptHiddenFields() {
+            if (!$templateForm.length) {
+                return;
+            }
+            const simplePrompt = $templateSimplePrompt.length ? String($templateSimplePrompt.val() || '') : '';
+            const hiddenRows = [
+                { name: 'prompt_blocks_key[]', value: 'main' },
+                { name: 'prompt_blocks_label[]', value: jsT('Основной промпт') },
+                { name: 'prompt_blocks_prompt[]', value: simplePrompt }
+            ];
+            hiddenRows.forEach(function (item) {
+                $('<input>', {
+                    type: 'hidden',
+                    class: 'ucg-simple-prompt-hidden',
+                    name: item.name,
+                    value: item.value
+                }).appendTo($templateForm);
+            });
+        }
+
+        function updateTemplateEditorByScenario(forcePreset) {
+            if (!$templateScenario.length) {
+                return;
+            }
+            const scenario = String($templateScenario.val() || 'field_update');
+            const useFieldEditor = isFieldEditorScenario(scenario);
+            const useBlockEditor = isBlockEditorScenario(scenario);
+            const useSimpleEditor = isSimplePromptScenario(scenario);
+            if ($templateFieldsEditor.length) {
+                $templateFieldsEditor.toggle(useFieldEditor);
+            }
+            if ($templateBlockEditor.length) {
+                $templateBlockEditor.toggle(useBlockEditor);
+            }
+            if ($templateSimpleEditor.length) {
+                $templateSimpleEditor.toggle(useSimpleEditor);
+            }
+
+            if (useSimpleEditor) {
+                syncSimplePromptFromBlocksIfEmpty();
+            } else if (useBlockEditor) {
+                syncBlockPromptFromSimpleIfEmpty();
+            }
+
+            setBlockPromptInputsEnabled(useBlockEditor);
+
+            if (useFieldEditor) {
+                ensureTemplateFieldPresetIfNeeded(!!forcePreset);
+                if ($templateFieldsJson.length) {
+                    $templateFieldsJson.val(JSON.stringify(collectTemplateFieldsPayload()));
+                }
+            } else if ($templateFieldsJson.length) {
+                $templateFieldsJson.val('[]');
+            }
+        }
+
+        function firstVisibleTemplatePromptInput() {
+            if ($templateFieldsEditor.length && $templateFieldsEditor.is(':visible')) {
+                const $fieldPrompt = $templateFieldRows.find('.ucg-template-field-prompt').first();
+                if ($fieldPrompt.length) {
+                    return $fieldPrompt;
+                }
+            }
+            if ($templateSimpleEditor.length && $templateSimpleEditor.is(':visible') && $templateSimplePrompt.length) {
+                return $templateSimplePrompt;
+            }
+            if ($templateBlockEditor.length && $templateBlockEditor.is(':visible')) {
+                const $firstBlockInput = $templateBlockRows.find('.ucg-template-block-input').first();
+                if ($firstBlockInput.length) {
+                    return $firstBlockInput;
+                }
+            }
+            return $templateBody;
+        }
+
         function activeTemplateEditorInput() {
             if ($activeTemplateInput && $activeTemplateInput.length && $activeTemplateInput.is(':visible')) {
                 return $activeTemplateInput;
             }
-            const $firstBlockInput = $templateBlockRows.find('.ucg-template-block-input').first();
-            if ($firstBlockInput.length) {
-                return $firstBlockInput;
-            }
-            return $templateBody;
+            return firstVisibleTemplatePromptInput();
         }
 
         function buildBlockRow(index, key, label, prompt) {
@@ -700,14 +1246,12 @@ jQuery(function ($) {
             }
 
             const scenario = String($templateScenario.val() || 'field_update');
+            if (!isBlockEditorScenario(scenario)) {
+                return;
+            }
             const $rows = $templateBlockRows.find('.ucg-template-block-row');
             if (!$rows.length) {
-                if (scenario === 'seo_tags') {
-                    addPromptBlockRow({ key: 'seo_title', label: jsT('SEO title') });
-                    addPromptBlockRow({ key: 'seo_description', label: jsT('SEO description') });
-                } else {
-                    addPromptBlockRow({ key: 'main', label: jsT('Основной промпт') });
-                }
+                addPromptBlockRow({ key: 'main', label: jsT('Основной промпт') });
                 return;
             }
 
@@ -722,14 +1266,7 @@ jQuery(function ($) {
                 return;
             }
 
-            if (scenario === 'seo_tags' && (currentKey === '' || currentKey === 'main' || currentKey === 'block_1')) {
-                $templateBlockRows.empty();
-                addPromptBlockRow({ key: 'seo_title', label: jsT('SEO title') });
-                addPromptBlockRow({ key: 'seo_description', label: jsT('SEO description') });
-                return;
-            }
-
-            if (scenario !== 'seo_tags' && (currentKey === '' || currentKey === 'seo_title')) {
+            if (currentKey === '' || currentKey === 'seo_title') {
                 $templateBlockRows.empty();
                 addPromptBlockRow({ key: 'main', label: jsT('Основной промпт') });
             }
@@ -772,8 +1309,34 @@ jQuery(function ($) {
                     return;
                 }
                 const data = response.data || {};
-                renderTokenButtons($tokensContainer, Array.isArray(data.tokens) ? data.tokens : []);
+                templateTokensSource = Array.isArray(data.tokens) ? data.tokens : [];
+                renderTemplateTokens();
             });
+        }
+
+        function collectTemplateTokensFromDom() {
+            if (!$tokensContainer.length) {
+                return [];
+            }
+            const result = [];
+            $tokensContainer.find('.ucg-token-btn').each(function () {
+                const $btn = $(this);
+                const token = String($btn.attr('data-token') || '').trim();
+                if (!token) {
+                    return;
+                }
+                const label = String($btn.attr('title') || token);
+                result.push({ token: token, label: label });
+            });
+            return result;
+        }
+
+        function renderTemplateTokens() {
+            if (!$tokensContainer.length) {
+                return;
+            }
+            const query = $templateTokenSearch.length ? String($templateTokenSearch.val() || '') : '';
+            renderTokenButtons($tokensContainer, templateTokensSource, query);
         }
 
         function filteredLibraryPrompts() {
@@ -870,7 +1433,7 @@ jQuery(function ($) {
             }
 
             const prompt = findLibraryPromptById(selectedPromptId);
-            if (!prompt || !$templateBody.length) {
+            if (!prompt) {
                 return;
             }
 
@@ -879,13 +1442,10 @@ jQuery(function ($) {
                 return;
             }
 
-            const $firstBlockInput = $templateBlockRows.find('.ucg-template-block-input').first();
-            if ($firstBlockInput.length) {
-                $firstBlockInput.val(body).trigger('input');
-                $activeTemplateInput = $firstBlockInput;
-            } else if ($templateBody.length) {
-                $templateBody.val(body).trigger('input');
-                $activeTemplateInput = $templateBody;
+            const $targetInput = firstVisibleTemplatePromptInput();
+            if ($targetInput.length) {
+                $targetInput.val(body).trigger('input');
+                $activeTemplateInput = $targetInput;
             }
             if ($templateName.length) {
                 const currentName = String($templateName.val() || '').trim();
@@ -903,8 +1463,15 @@ jQuery(function ($) {
             });
         }
 
+        if ($templateTokenSearch.length) {
+            $templateTokenSearch.on('input', function () {
+                renderTemplateTokens();
+            });
+        }
+
         if ($templateScenario.length) {
             $templateScenario.on('change', function () {
+                updateTemplateEditorByScenario(true);
                 applyScenarioPresetIfNeeded();
             });
         }
@@ -946,6 +1513,18 @@ jQuery(function ($) {
             });
         }
 
+        if ($addTemplateField.length) {
+            $addTemplateField.on('click', function () {
+                addTemplateFieldRow({
+                    key: 'field_' + nextTemplateFieldIndex(),
+                    label: '',
+                    prompt: '',
+                    enabled: true,
+                    length_option_id: templateDefaultLengthOptionId > 0 ? templateDefaultLengthOptionId : 0
+                });
+            });
+        }
+
         $(document).on('click', '.ucg-remove-prompt-block', function () {
             const $row = $(this).closest('.ucg-template-block-row');
             if ($row.length) {
@@ -954,7 +1533,21 @@ jQuery(function ($) {
             applyScenarioPresetIfNeeded();
         });
 
-        $(document).on('focus', '#ucg-template-body, .ucg-template-block-input', function () {
+        $(document).on('click', '.ucg-remove-template-field', function () {
+            const $row = $(this).closest('.ucg-template-field-row');
+            if ($row.length) {
+                $row.remove();
+            }
+            const scenario = String($templateScenario.val() || '');
+            if (isFieldEditorScenario(scenario) && !$templateFieldRows.find('.ucg-template-field-row').length) {
+                ensureTemplateFieldPresetIfNeeded(false);
+            }
+            if ($templateFieldsJson.length) {
+                $templateFieldsJson.val(JSON.stringify(collectTemplateFieldsPayload()));
+            }
+        });
+
+        $(document).on('focus', '#ucg-template-body, #ucg-template-simple-prompt, .ucg-template-block-input, .ucg-template-field-prompt', function () {
             $activeTemplateInput = $(this);
         });
 
@@ -976,11 +1569,11 @@ jQuery(function ($) {
             }
         });
 
-        $(document).on('dragover', '#ucg-template-body, .ucg-template-block-input', function (event) {
+        $(document).on('dragover', '#ucg-template-body, #ucg-template-simple-prompt, .ucg-template-block-input, .ucg-template-field-prompt', function (event) {
             event.preventDefault();
         });
 
-        $(document).on('drop', '#ucg-template-body, .ucg-template-block-input', function (event) {
+        $(document).on('drop', '#ucg-template-body, #ucg-template-simple-prompt, .ucg-template-block-input, .ucg-template-field-prompt', function (event) {
             event.preventDefault();
             if (!event.originalEvent || !event.originalEvent.dataTransfer) {
                 return;
@@ -996,12 +1589,36 @@ jQuery(function ($) {
             insertAtCursor(activeTemplateEditorInput(), token);
         });
 
+        if ($templateForm.length) {
+            $templateForm.on('submit', function () {
+                const scenario = String($templateScenario.val() || 'field_update');
+                removeSimplePromptHiddenFields();
+
+                if (!$templateFieldsJson.length) {
+                    if (isSimplePromptScenario(scenario)) {
+                        appendSimplePromptHiddenFields();
+                    }
+                    return;
+                }
+
+                if (isFieldEditorScenario(scenario)) {
+                    $templateFieldsJson.val(JSON.stringify(collectTemplateFieldsPayload()));
+                    return;
+                }
+                $templateFieldsJson.val('[]');
+                if (isSimplePromptScenario(scenario)) {
+                    appendSimplePromptHiddenFields();
+                }
+            });
+        }
+
         initEnhancedSelects($templatePostType);
         initEnhancedSelects($templateScenario);
         initEnhancedSelects($readyTypeFilter);
         initEnhancedSelects($libraryCategory);
         initEnhancedSelects($libraryType);
         initEnhancedSelects($libraryPrompt);
+        initEnhancedSelects($templateFieldRows.find('.ucg-template-field-length'));
 
         const readyTypeElement = $readyTypeFilter.length ? $readyTypeFilter.get(0) : null;
         if (readyTypeElement && readyTypeElement.tomselect) {
@@ -1011,9 +1628,23 @@ jQuery(function ($) {
         applyReadyTypeFilter();
         renderLibraryPromptSelect();
         applyScenarioPresetIfNeeded();
-        const $initialBlockInput = $templateBlockRows.find('.ucg-template-block-input').first();
-        if ($initialBlockInput.length) {
-            $activeTemplateInput = $initialBlockInput;
+        updateTemplateEditorByScenario(false);
+        templateTokensSource = collectTemplateTokensFromDom();
+        renderTemplateTokens();
+        if ($templatePostType.length) {
+            loadTokens(String($templatePostType.val() || ''));
+        }
+        const $initialPromptInput = firstVisibleTemplatePromptInput();
+        if ($initialPromptInput.length) {
+            $activeTemplateInput = $initialPromptInput;
+        }
+        if ($templateFieldsJson.length) {
+            const scenario = String($templateScenario.val() || 'field_update');
+            if (isFieldEditorScenario(scenario)) {
+                $templateFieldsJson.val(JSON.stringify(collectTemplateFieldsPayload()));
+            } else {
+                $templateFieldsJson.val('[]');
+            }
         }
     }
 
@@ -1024,7 +1655,6 @@ jQuery(function ($) {
         const $saveStyleDefaults = $('#ucg-save-style-defaults');
         const $defaultLanguage = $('#ucg-default-language');
         const $defaultTone = $('#ucg-default-tone');
-        const $defaultUniqueness = $('#ucg-default-uniqueness');
         if (!$batchInput.length || !$saveBatchButton.length) {
             return;
         }
@@ -1032,7 +1662,6 @@ jQuery(function ($) {
         initEnhancedSelects($generationMode);
         initEnhancedSelects($defaultLanguage);
         initEnhancedSelects($defaultTone);
-        initEnhancedSelects($defaultUniqueness);
 
         $saveBatchButton.on('click', function () {
             const raw = Number($batchInput.val() || 20);
@@ -1082,8 +1711,7 @@ jQuery(function ($) {
                     action: 'ucg_save_style_defaults',
                     nonce: ucgAdmin.nonce,
                     default_language: String($defaultLanguage.val() || 'auto'),
-                    default_tone: String($defaultTone.val() || 'neutral'),
-                    default_uniqueness: String($defaultUniqueness.val() || 'medium')
+                    default_tone: String($defaultTone.val() || 'neutral')
                 }).done(function (response) {
                     if (!response.success) {
                         const msg = response.data && response.data.message ? response.data.message : jsT('Не удалось сохранить настройки.');
@@ -1234,6 +1862,7 @@ jQuery(function ($) {
         if (!initialSchema || typeof initialSchema !== 'object') {
             return;
         }
+        const initialPrefill = parseJsonScript('#ucg-wizard-prefill', {});
 
         const state = {
             step: 1,
@@ -1248,11 +1877,26 @@ jQuery(function ($) {
             currentItems: [],
             runMonitorTimer: null,
             activeRunId: 0,
+            templateAiFields: [],
+            templateStaticFields: [],
+            prefill: (initialPrefill && typeof initialPrefill === 'object') ? initialPrefill : {},
+            prefillApplied: false,
+            quoteEstimate: null,
+            quoteEstimateSignature: '',
+            quoteError: '',
+            quoteRequestSeq: 0,
+            quoteRequestTimer: null,
+            quoteRequestXhr: null,
+            quoteRequestInFlight: false,
+            quoteRequestSignature: '',
+            quoteFailedSignature: '',
+            quoteFailedAt: 0
         };
 
         const $scenarioCards = $('#ucg-wizard-scenario-picker');
         const $scenarioInputs = $('input[name="ucg-wizard-scenario"]');
         const $postType = $('#ucg-wizard-post-type');
+        const $postTypeWrap = $('#ucg-wizard-post-type-wrap');
         const $targetField = $('#ucg-wizard-target-field');
         const $targetFieldWrap = $('#ucg-wizard-target-field-wrap');
         const $targetFieldLabel = $('#ucg-wizard-target-field-label');
@@ -1269,11 +1913,21 @@ jQuery(function ($) {
         const $varyLength = $('#ucg-wizard-vary-length');
         const $varyLengthHint = $('#ucg-wizard-vary-length-hint');
         const $varyLengthHelp = $('#ucg-wizard-vary-length-help');
+        const $templatePromptCard = $('#ucg-template-prompt-card');
+        const $templateTokenCard = $('#ucg-template-token-card');
         const $templateBodyStandardWrap = $('#ucg-template-body-standard-wrap');
         const $templateBodySeoWrap = $('#ucg-template-body-seo-wrap');
+        const $templateBodyMultiWrap = $('#ucg-template-body-multi-wrap');
         const $templateBody = $('#ucg-wizard-template-body');
         const $templateBodySeoTitle = $('#ucg-wizard-template-body-seo-title');
         const $templateBodySeoDescription = $('#ucg-wizard-template-body-seo-description');
+        const $aiFieldRows = $('#ucg-ai-field-rows');
+        const $seoFieldSection = $('#ucg-seo-field-section');
+        const $seoFieldRows = $('#ucg-seo-field-rows');
+        const $staticFieldRows = $('#ucg-static-field-rows');
+        const $aiFieldEnabledCount = $('#ucg-ai-field-enabled-count');
+        const $seoFieldEnabledCount = $('#ucg-seo-field-enabled-count');
+        const $staticFieldEnabledCount = $('#ucg-static-field-enabled-count');
         const $publishDateRangeWrap = $('#ucg-publish-date-range-wrap');
         const $publishDateFrom = $('#ucg-wizard-publish-date-from');
         const $publishDateTo = $('#ucg-wizard-publish-date-to');
@@ -1282,7 +1936,6 @@ jQuery(function ($) {
         const $wooRatingMax = $('#ucg-woo-rating-max');
         const $styleLanguage = $('#ucg-wizard-language');
         const $styleTone = $('#ucg-wizard-tone');
-        const $styleUniqueness = $('#ucg-wizard-uniqueness');
         const $wizardTokenSearch = $('#ucg-wizard-token-search');
         const $tokens = $('#ucg-wizard-tokens');
         const $filterRows = $('#ucg-filter-rows');
@@ -1291,6 +1944,11 @@ jQuery(function ($) {
         const $previewFoundCount = $('#ucg-preview-found-count');
         const $previewSelectedCount = $('#ucg-preview-selected-count');
         const $selectionModeFilteredTotal = $('#ucg-selection-mode-filtered-total');
+        const $runTargetModeWrap = $('#ucg-run-mode-wrap');
+        const $runTargetMode = $('input[name="ucg-run-target-mode"]');
+        const $step2CreateWrap = $('#ucg-step2-create-wrap');
+        const $step2UpdateWrap = $('#ucg-step2-update-wrap');
+        const $createTopics = $('#ucg-create-topics');
         const $previewPagination = $('#ucg-preview-pagination');
         const $selectedCount = $('#ucg-selected-count');
         const $runResult = $('#ucg-run-result');
@@ -1309,6 +1967,7 @@ jQuery(function ($) {
         const $runReviewLink = $('#ucg-run-review-link');
         const $selectionMode = $('input[name="ucg-selection-mode"]');
         const $saveTemplateChanges = $('#ucg-save-template-changes');
+        const $createModeTokenWarning = $('#ucg-create-mode-token-warning');
         let $activeTemplateTextarea = $templateBody;
         let lastToastSignature = '';
         let lastToastAt = 0;
@@ -1345,6 +2004,148 @@ jQuery(function ($) {
         function scenarioSupportsWooRatingRange(scenario) {
             const normalized = String(scenario || '').trim();
             return normalized === 'woo_reviews';
+        }
+
+        function scenarioSupportsMultiFields(scenario) {
+            const normalized = String(scenario || '').trim();
+            return normalized === 'post_fields' || normalized === 'product_fields' || normalized === 'image_generation';
+        }
+
+        function scenarioRequiresProductPostType(scenario) {
+            const normalized = String(scenario || '').trim();
+            return normalized === 'product_fields';
+        }
+
+        function scenarioSupportsCreateNewMode(scenario) {
+            const normalized = String(scenario || '').trim();
+            return normalized === 'post_fields' || normalized === 'product_fields';
+        }
+
+        function normalizeCreateTopics(value) {
+            if (Array.isArray(value)) {
+                return value.map(function (item) {
+                    return String(item == null ? '' : item).trim();
+                }).filter(function (item) {
+                    return item !== '';
+                }).slice(0, 1000);
+            }
+            const rawText = String(value == null ? '' : value);
+            if (!rawText.trim()) {
+                return [];
+            }
+            return rawText.split(/\r\n|\r|\n/).map(function (line) {
+                return String(line || '').trim();
+            }).filter(function (line) {
+                return line !== '';
+            }).slice(0, 1000);
+        }
+
+        function collectCreateTopics() {
+            if (!$createTopics.length) {
+                return [];
+            }
+            return normalizeCreateTopics($createTopics.val());
+        }
+
+        function getAiRowsContainers() {
+            return $aiFieldRows.add($seoFieldRows);
+        }
+
+        function isSeoAiField(targetField, key) {
+            const normalizedTarget = String(targetField || '').trim().toLowerCase();
+            const normalizedKey = String(key || '').trim().toLowerCase();
+            if (normalizedTarget.indexOf('seo_field:') === 0) {
+                return true;
+            }
+            return normalizedKey === 'seo_title' || normalizedKey === 'seo_description';
+        }
+
+        function normalizeAiOutputType(targetField, key, explicitType) {
+            const normalizedExplicit = String(explicitType || '').trim().toLowerCase();
+            if (normalizedExplicit === 'image') {
+                return 'image';
+            }
+            const normalizedTarget = String(targetField || '').trim().toLowerCase();
+            const normalizedKey = String(key || '').trim().toLowerCase();
+            if (normalizedTarget.indexOf('media:') === 0) {
+                return 'image';
+            }
+            if (normalizedKey === 'featured_image' || normalizedKey === 'product_images' || normalizedKey === 'product_gallery') {
+                return 'image';
+            }
+            return 'text';
+        }
+
+        function isImageAiField(targetField, key, explicitType) {
+            return normalizeAiOutputType(targetField, key, explicitType) === 'image';
+        }
+
+        function aiFieldSupportsLength(targetField, key) {
+            if (isImageAiField(targetField, key)) {
+                return false;
+            }
+            const normalizedTarget = String(targetField || '').trim().toLowerCase();
+            const normalizedKey = String(key || '').trim().toLowerCase();
+            if (normalizedTarget === 'post:post_title') {
+                return false;
+            }
+            if (normalizedTarget === 'seo_field:title' || normalizedTarget === 'seo_field:description') {
+                return false;
+            }
+            if (normalizedKey === 'post_title' || normalizedKey === 'seo_title' || normalizedKey === 'seo_description') {
+                return false;
+            }
+            return true;
+        }
+
+        function getRunTargetMode() {
+            const scenario = getScenario();
+            if (!scenarioSupportsCreateNewMode(scenario)) {
+                return 'update_existing';
+            }
+            const selected = String($runTargetMode.filter(':checked').val() || 'update_existing');
+            return selected === 'create_new' ? 'create_new' : 'update_existing';
+        }
+
+        function isCreateNewMode() {
+            return getRunTargetMode() === 'create_new';
+        }
+
+        function setPostTypeValueSilently(value) {
+            if (!$postType.length) {
+                return;
+            }
+            const normalized = String(value == null ? '' : value);
+            $postType.val(normalized);
+            const el = $postType.get(0);
+            if (el && el.tomselect) {
+                el.tomselect.setValue(normalized, true);
+            }
+        }
+
+        function applyPostTypeSelectionVisibility(scenario) {
+            const normalizedScenario = String(scenario || '').trim();
+            const requiresProduct = scenarioRequiresProductPostType(scenario);
+            if (requiresProduct && $postType.find('option[value="product"]').length) {
+                if (String($postType.val() || '') !== 'product') {
+                    setPostTypeValueSilently('product');
+                }
+            } else if (normalizedScenario === 'post_fields' && String($postType.val() || '') === 'product') {
+                if ($postType.find('option[value="post"]').length) {
+                    setPostTypeValueSilently('post');
+                } else {
+                    const $firstNonProduct = $postType.find('option').filter(function () {
+                        return String($(this).val() || '') !== 'product';
+                    }).first();
+                    if ($firstNonProduct.length) {
+                        setPostTypeValueSilently(String($firstNonProduct.val() || ''));
+                    }
+                }
+            }
+            if ($postTypeWrap.length) {
+                $postTypeWrap.toggle(!requiresProduct);
+            }
+            return String($postType.val() || '');
         }
 
         function normalizeItemsPerPost(value) {
@@ -1397,11 +2198,12 @@ jQuery(function ($) {
 
         function applyItemsPerPostVisibility(scenario) {
             const enabled = scenarioSupportsItemsPerPost(scenario);
+            const hideTargetField = enabled || scenarioSupportsMultiFields(scenario);
             if ($itemsPerPostWrap.length) {
                 $itemsPerPostWrap.toggle(enabled);
             }
             if ($targetFieldWrap.length) {
-                $targetFieldWrap.toggle(!enabled);
+                $targetFieldWrap.toggle(!hideTargetField);
             }
             if (!enabled) {
                 if ($itemsPerPost.length) {
@@ -1466,9 +2268,1080 @@ jQuery(function ($) {
             };
         }
 
+        function lengthOptionsSource() {
+            const source = Array.isArray(state.schema.text_length_options) ? state.schema.text_length_options : [];
+            if (source.length) {
+                return source;
+            }
+            return [
+                { id: 1, name: jsT('Короткое') },
+                { id: 2, name: jsT('Стандартное') },
+                { id: 3, name: jsT('Расширенное') },
+                { id: 4, name: jsT('Большое') }
+            ];
+        }
+
+        function aiFieldPresets() {
+            return Array.isArray(state.schema.ai_field_presets) ? state.schema.ai_field_presets : [];
+        }
+
+        function imageGenerationModelsSource() {
+            const models = Array.isArray(state.schema.image_generation_models) ? state.schema.image_generation_models : [];
+            return models.filter(function (item) {
+                if (!item || typeof item !== 'object') {
+                    return false;
+                }
+                const id = String(item.id || '').trim();
+                const name = String(item.name || id).trim();
+                return id !== '' && name !== '';
+            });
+        }
+
+        function staticFieldPresets() {
+            return Array.isArray(state.schema.static_field_presets) ? state.schema.static_field_presets : [];
+        }
+
+        function isRemovedProductStaticFieldKey(key) {
+            const normalized = String(key || '').trim().toLowerCase();
+            return normalized === 'regular_price' || normalized === 'sale_price' || normalized === 'sku';
+        }
+
+        function remapLegacyProductStaticField(key, targetField, scenario) {
+            const normalizedScenario = String(scenario || '').trim().toLowerCase();
+            let normalizedKey = String(key || '').trim();
+            let normalizedTarget = String(targetField || '').trim();
+            if (normalizedScenario !== 'product_fields') {
+                return { key: normalizedKey, target_field: normalizedTarget };
+            }
+
+            const loweredKey = normalizedKey.toLowerCase();
+            if (loweredKey === 'post_category') {
+                normalizedKey = 'product_category';
+            } else if (loweredKey === 'post_tag') {
+                normalizedKey = 'product_tag';
+            }
+
+            const loweredTarget = normalizedTarget.toLowerCase();
+            if (loweredTarget === 'tax:category') {
+                normalizedTarget = 'tax:product_cat';
+            } else if (loweredTarget === 'tax:post_tag') {
+                normalizedTarget = 'tax:product_tag';
+            }
+
+            return { key: normalizedKey, target_field: normalizedTarget };
+        }
+
+        function normalizeArrayFieldValue(value) {
+            if (Array.isArray(value)) {
+                return value.map(function (item) {
+                    return String(item == null ? '' : item);
+                }).filter(function (item) {
+                    return item !== '';
+                });
+            }
+            if (value == null) {
+                return [];
+            }
+            const raw = String(value).trim();
+            if (!raw) {
+                return [];
+            }
+            if (raw.indexOf(',') !== -1) {
+                return raw.split(',').map(function (item) {
+                    return String(item || '').trim();
+                }).filter(function (item) {
+                    return item !== '';
+                });
+            }
+            return [raw];
+        }
+
+        function normalizeTargetFieldByKeyInWizard(key) {
+            const normalized = String(key || '').trim().toLowerCase();
+            const map = {
+                post_title: 'post:post_title',
+                post_content: 'post:post_content',
+                post_excerpt: 'post:post_excerpt',
+                seo_title: 'seo_field:title',
+                seo_description: 'seo_field:description',
+                title: 'seo_field:title',
+                description: 'seo_field:description',
+                post_status: 'post:post_status',
+                post_author: 'post:post_author',
+                post_date: 'post:post_date',
+                post_category: 'tax:category',
+                post_tag: 'tax:post_tag',
+                product_category: 'tax:product_cat',
+                product_tag: 'tax:product_tag',
+                stock_status: 'meta:_stock_status',
+                stock_quantity: 'meta:_stock',
+                catalog_visibility: 'meta:_visibility',
+                featured_image: 'media:featured',
+                product_images: 'media:product_images',
+                product_gallery: 'media:gallery'
+            };
+            if (Object.prototype.hasOwnProperty.call(map, normalized)) {
+                return map[normalized];
+            }
+            if (normalized.indexOf('post_') === 0) {
+                return 'post:' + normalized;
+            }
+            if (normalized.indexOf('meta_') === 0) {
+                return 'meta:' + normalized.substring(5);
+            }
+            if (normalized.indexOf('tax_') === 0) {
+                return 'tax:' + normalized.substring(4);
+            }
+            return '';
+        }
+
+        function findFieldByKey(fields, key) {
+            const normalizedKey = String(key || '').trim();
+            if (!normalizedKey || !Array.isArray(fields)) {
+                return null;
+            }
+            for (let i = 0; i < fields.length; i += 1) {
+                const row = fields[i];
+                if (!row || typeof row !== 'object') {
+                    continue;
+                }
+                if (String(row.key || '') === normalizedKey) {
+                    return row;
+                }
+            }
+            return null;
+        }
+
+        function normalizeFieldBoolean(value, defaultValue) {
+            if (typeof value === 'boolean') {
+                return value;
+            }
+            if (value === null || typeof value === 'undefined') {
+                return !!defaultValue;
+            }
+            const normalized = String(value).trim().toLowerCase();
+            if (!normalized) {
+                return !!defaultValue;
+            }
+            if (normalized === '0' || normalized === 'false' || normalized === 'off' || normalized === 'no') {
+                return false;
+            }
+            return true;
+        }
+
+        function normalizeTemplateFieldsInput(rawFields) {
+            if (Array.isArray(rawFields)) {
+                return rawFields;
+            }
+            if (!rawFields || typeof rawFields !== 'object') {
+                return [];
+            }
+            const rows = [];
+            Object.keys(rawFields).forEach(function (key) {
+                const row = rawFields[key];
+                if (!row || typeof row !== 'object') {
+                    return;
+                }
+                if (!Object.prototype.hasOwnProperty.call(row, 'key')) {
+                    rows.push($.extend({ key: String(key) }, row));
+                    return;
+                }
+                rows.push(row);
+            });
+            return rows;
+        }
+
+        function normalizeTemplateAiFields(rawFields) {
+            const source = normalizeTemplateFieldsInput(rawFields);
+            const normalized = [];
+            source.forEach(function (field, index) {
+                if (!field || typeof field !== 'object') {
+                    return;
+                }
+                const key = String(field.key || field.id || field.slug || ('ai_' + (index + 1))).trim();
+                if (!key) {
+                    return;
+                }
+                const targetField = String(field.target_field || field.targetField || normalizeTargetFieldByKeyInWizard(key)).trim();
+                const prompt = String(
+                    field.prompt ||
+                    field.prompt_template ||
+                    field.template_prompt ||
+                    field.body ||
+                    field.text ||
+                    field.template ||
+                    ''
+                );
+                const lengthOptionId = Number(
+                    field.length_option_id ||
+                    field.lengthOptionId ||
+                    field.length_id ||
+                    0
+                );
+                const maxChars = Number(field.max_chars || field.maxChars || 0);
+                const outputType = normalizeAiOutputType(
+                    targetField,
+                    key,
+                    field.output_type || field.outputType || ''
+                );
+                const fieldModel = String(field.model || field.model_id || 'auto').trim() || 'auto';
+                const imagesCountRaw = Number(field.images_count || field.imagesCount || 1);
+                const imagesCount = Number.isFinite(imagesCountRaw) ? Math.max(1, Math.min(8, Math.round(imagesCountRaw))) : 1;
+                const aspectRatio = String(field.aspect_ratio || field.aspectRatio || '').trim();
+                const imageSize = String(field.image_size || field.imageSize || '').trim().toUpperCase();
+                normalized.push({
+                    key: key,
+                    label: String(field.label || field.name || key),
+                    enabled: normalizeFieldBoolean(field.enabled, true),
+                    target_field: targetField,
+                    prompt: prompt,
+                    length_option_id: lengthOptionId > 0 ? lengthOptionId : 0,
+                    max_chars: maxChars > 0 ? maxChars : 0,
+                    output_type: outputType,
+                    model: fieldModel,
+                    images_count: imagesCount,
+                    aspect_ratio: aspectRatio,
+                    image_size: imageSize
+                });
+            });
+            return normalized;
+        }
+
+        function normalizeTemplateStaticFields(rawFields, scenario) {
+            const source = normalizeTemplateFieldsInput(rawFields);
+            const normalized = [];
+            const normalizedScenario = String(scenario || getScenario() || '').trim();
+            const usedKeys = new Set();
+            source.forEach(function (field, index) {
+                if (!field || typeof field !== 'object') {
+                    return;
+                }
+                let key = String(field.key || field.id || field.slug || ('static_' + (index + 1))).trim();
+                if (!key) {
+                    return;
+                }
+                let targetField = String(field.target_field || field.targetField || normalizeTargetFieldByKeyInWizard(key)).trim();
+                const remapped = remapLegacyProductStaticField(key, targetField, normalizedScenario);
+                key = String(remapped.key || '').trim();
+                targetField = String(remapped.target_field || '').trim();
+                if (!key) {
+                    return;
+                }
+                if (!targetField) {
+                    targetField = normalizeTargetFieldByKeyInWizard(key);
+                }
+                if (usedKeys.has(key)) {
+                    return;
+                }
+                usedKeys.add(key);
+                const inputType = String(field.input_type || field.inputType || 'text').trim();
+                const options = Array.isArray(field.options) ? field.options : [];
+                const value = Object.prototype.hasOwnProperty.call(field, 'value') ? field.value : '';
+                const placeholder = String(field.placeholder || '');
+                const hint = String(field.hint || '');
+                normalized.push({
+                    key: key,
+                    label: String(field.label || field.name || key),
+                    enabled: normalizeFieldBoolean(field.enabled, false),
+                    target_field: targetField,
+                    input_type: inputType || 'text',
+                    options: options,
+                    value: value,
+                    placeholder: placeholder,
+                    hint: hint
+                });
+            });
+            return normalized;
+        }
+
+        function mergeStaticPresetWithRuntime(preset, runtimeField) {
+            const merged = $.extend({}, preset || {});
+            if (!runtimeField || typeof runtimeField !== 'object') {
+                return merged;
+            }
+            if (Object.prototype.hasOwnProperty.call(runtimeField, 'enabled')) {
+                merged.enabled = normalizeFieldBoolean(runtimeField.enabled, !!merged.enabled);
+            }
+            if (Object.prototype.hasOwnProperty.call(runtimeField, 'value')) {
+                merged.value = runtimeField.value;
+            }
+            return merged;
+        }
+
+        function normalizeTaxonomyChecklistOptions(rawOptions) {
+            if (!Array.isArray(rawOptions)) {
+                return [];
+            }
+
+            const normalizeNode = function (node) {
+                if (!node || typeof node !== 'object') {
+                    return null;
+                }
+                const value = String(
+                    node.value ||
+                    node.id ||
+                    ''
+                ).trim();
+                if (!value) {
+                    return null;
+                }
+                const label = String(node.label || node.name || value);
+                const childrenSource = Array.isArray(node.children) ? node.children : [];
+                const children = [];
+                childrenSource.forEach(function (childNode) {
+                    const normalizedChild = normalizeNode(childNode);
+                    if (normalizedChild) {
+                        children.push(normalizedChild);
+                    }
+                });
+                return {
+                    value: value,
+                    label: label,
+                    children: children
+                };
+            };
+
+            const normalized = [];
+            rawOptions.forEach(function (option) {
+                const normalizedNode = normalizeNode(option);
+                if (normalizedNode) {
+                    normalized.push(normalizedNode);
+                }
+            });
+            return normalized;
+        }
+
+        function buildTaxonomyChecklistHtml(nodes, selectedValuesSet, level) {
+            const items = Array.isArray(nodes) ? nodes : [];
+            if (!items.length) {
+                return '';
+            }
+            const depth = Math.max(0, Number(level || 0));
+            const listClass = depth > 0
+                ? 'ucg-static-tax-checklist ucg-static-tax-checklist--child'
+                : 'ucg-static-tax-checklist';
+            let html = '<ul class="' + listClass + '">';
+            items.forEach(function (node) {
+                if (!node || typeof node !== 'object') {
+                    return;
+                }
+                const value = String(node.value || '').trim();
+                if (!value) {
+                    return;
+                }
+                const label = String(node.label || value);
+                const checked = selectedValuesSet && selectedValuesSet.has(value) ? ' checked' : '';
+                const children = Array.isArray(node.children) ? node.children : [];
+                html += '' +
+                    '<li class="ucg-static-tax-checklist__item">' +
+                    '  <label class="ucg-static-tax-checklist__label">' +
+                    '    <input type="checkbox" class="ucg-static-field-value-check" value="' + escapeHtml(value) + '"' + checked + '>' +
+                    '    <span>' + escapeHtml(label) + '</span>' +
+                    '  </label>' +
+                    (children.length ? buildTaxonomyChecklistHtml(children, selectedValuesSet, depth + 1) : '') +
+                    '</li>';
+            });
+            html += '</ul>';
+            return html;
+        }
+
+        function setFieldControlDisabled($controls, disabled) {
+            if (!$controls || !$controls.length) {
+                return;
+            }
+            const shouldDisable = !!disabled;
+            $controls.each(function () {
+                const element = this;
+                const $element = $(element);
+                $element.prop('disabled', shouldDisable);
+                if (element && element.tomselect) {
+                    if (shouldDisable) {
+                        element.tomselect.disable();
+                    } else {
+                        element.tomselect.enable();
+                    }
+                }
+            });
+        }
+
+        function toggleAiFieldRow($row) {
+            if (!$row || !$row.length || !getAiRowsContainers().length) {
+                return;
+            }
+            if (!$row.find('.ucg-ai-field-enabled').is(':checked')) {
+                return;
+            }
+            const shouldOpen = !$row.hasClass('is-open');
+            $row.toggleClass('is-open', shouldOpen);
+            $row.find('.ucg-ai-field-row__body').prop('hidden', !shouldOpen);
+            $row.find('.ucg-ai-field-toggle').attr('aria-expanded', shouldOpen ? 'true' : 'false');
+            const $prompt = $row.find('.ucg-ai-field-prompt').first();
+            if (shouldOpen && $prompt.length) {
+                $activeTemplateTextarea = $prompt;
+            }
+        }
+
+        function refreshAiFieldRowsUi() {
+            if (!getAiRowsContainers().length) {
+                return;
+            }
+
+            const updateRowsState = function ($rows) {
+                let enabledCount = 0;
+                $rows.each(function () {
+                    const $row = $(this);
+                    const enabled = $row.find('.ucg-ai-field-enabled').is(':checked');
+                    const supportsLength = String($row.attr('data-supports-length') || '1') !== '0';
+                    const outputType = String($row.attr('data-output-type') || 'text').toLowerCase();
+                    const isImage = outputType === 'image';
+                    const $prompt = $row.find('.ucg-ai-field-prompt');
+                    const $length = $row.find('.ucg-ai-field-length');
+                    const $lengthWrap = $row.find('.ucg-ai-field-row__length-wrap');
+                    const $imageModel = $row.find('.ucg-ai-field-image-model');
+                    const $imageCount = $row.find('.ucg-ai-field-images-count');
+                    const $aspectRatio = $row.find('.ucg-ai-field-aspect-ratio');
+                    const $imageSize = $row.find('.ucg-ai-field-image-size');
+                    const hasOpenClass = $row.hasClass('is-open');
+                    const isOpen = enabled && hasOpenClass;
+
+                    if (enabled) {
+                        enabledCount += 1;
+                    }
+
+                    $row.toggleClass('is-disabled', !enabled);
+                    $row.toggleClass('is-length-hidden', !supportsLength);
+                    setFieldControlDisabled($prompt, !enabled);
+                    setFieldControlDisabled($length, !enabled || !supportsLength);
+                    setFieldControlDisabled($imageModel, !enabled || !isImage);
+                    setFieldControlDisabled($imageCount, !enabled || !isImage);
+                    setFieldControlDisabled($aspectRatio, !enabled || !isImage);
+                    setFieldControlDisabled($imageSize, !enabled || !isImage);
+                    if ($lengthWrap.length) {
+                        $lengthWrap.prop('hidden', !supportsLength);
+                    }
+                    $row.find('.ucg-ai-field-row__image-model-wrap').prop('hidden', !isImage);
+                    $row.find('.ucg-ai-field-row__image-count-wrap').prop('hidden', !isImage);
+                    $row.find('.ucg-ai-field-row__image-aspect-wrap').prop('hidden', !isImage);
+                    $row.find('.ucg-ai-field-row__image-size-wrap').prop('hidden', !isImage);
+                    $row.toggleClass('is-open', isOpen);
+                    $row.find('.ucg-ai-field-row__body').prop('hidden', !isOpen);
+                    $row.find('.ucg-ai-field-toggle').attr('aria-expanded', isOpen ? 'true' : 'false');
+                });
+                return enabledCount;
+            };
+
+            const aiEnabledCount = updateRowsState($aiFieldRows.find('.ucg-ai-field-row'));
+            const seoRows = $seoFieldRows.find('.ucg-ai-field-row');
+            const seoEnabledCount = updateRowsState(seoRows);
+            const hasSeoRows = seoRows.length > 0;
+
+            if ($seoFieldSection.length) {
+                $seoFieldSection.prop('hidden', !hasSeoRows).toggle(hasSeoRows);
+            }
+
+            if ($aiFieldEnabledCount.length) {
+                $aiFieldEnabledCount.text(String(aiEnabledCount));
+            }
+            if ($seoFieldEnabledCount.length) {
+                $seoFieldEnabledCount.text(String(seoEnabledCount));
+            }
+        }
+
+        function truncateFieldBadgeValue(value) {
+            const text = String(value || '').trim();
+            if (!text) {
+                return '—';
+            }
+            if (text.length <= 52) {
+                return text;
+            }
+            return text.slice(0, 49) + '...';
+        }
+
+        function collectStaticFieldPreviewValue($row, enabled) {
+            if (!$row || !$row.length || !enabled) {
+                return '—';
+            }
+            const inputType = String($row.attr('data-input-type') || 'text');
+            const $input = $row.find('.ucg-static-field-value').first();
+
+            if (inputType === 'multiselect') {
+                if (!$input.length) {
+                    return '—';
+                }
+                const selectedValues = normalizeArrayFieldValue($input.val());
+                if (!selectedValues.length) {
+                    return '—';
+                }
+                const labelsByValue = {};
+                $input.find('option').each(function () {
+                    const value = String($(this).attr('value') || '');
+                    labelsByValue[value] = String($(this).text() || '').trim();
+                });
+                return truncateFieldBadgeValue(selectedValues.map(function (value) {
+                    return labelsByValue[value] || value;
+                }).join(', '));
+            }
+
+            if (inputType === 'select') {
+                if (!$input.length) {
+                    return '—';
+                }
+                const label = String($input.find('option:selected').first().text() || '').trim();
+                return truncateFieldBadgeValue(label);
+            }
+
+            if (inputType === 'taxonomy_checklist') {
+                const labels = [];
+                $row.find('.ucg-static-field-value-check:checked').each(function () {
+                    const label = String($(this).closest('label').find('span').first().text() || '').trim();
+                    if (label) {
+                        labels.push(label);
+                    }
+                });
+                return truncateFieldBadgeValue(labels.join(', '));
+            }
+
+            if (!$input.length) {
+                return '—';
+            }
+            const value = String($input.val() == null ? '' : $input.val()).trim();
+            return truncateFieldBadgeValue(value);
+        }
+
+        function refreshStaticFieldRowsUi() {
+            if (!$staticFieldRows.length) {
+                return;
+            }
+            let enabledCount = 0;
+            $staticFieldRows.find('.ucg-static-field-row').each(function () {
+                const $row = $(this);
+                const enabled = $row.find('.ucg-static-field-enabled').is(':checked');
+                const previewValue = collectStaticFieldPreviewValue($row, enabled);
+                const $body = $row.find('.ucg-static-field-row__body');
+                if (enabled) {
+                    enabledCount += 1;
+                }
+                $row.toggleClass('is-disabled', !enabled);
+                setFieldControlDisabled($row.find('.ucg-static-field-value, .ucg-static-field-value-check'), !enabled);
+                $body.prop('hidden', !enabled);
+                $row.find('.ucg-static-field-value-badge')
+                    .text(previewValue)
+                    .toggleClass('is-active', enabled && previewValue !== '—');
+            });
+            if ($staticFieldEnabledCount.length) {
+                $staticFieldEnabledCount.text(String(enabledCount));
+            }
+        }
+
+        function renderAiFieldRows(templateFields) {
+            if (!$aiFieldRows.length && !$seoFieldRows.length) {
+                return;
+            }
+            const presets = aiFieldPresets();
+            const template = normalizeTemplateAiFields(templateFields);
+            const hasTemplateFields = template.length > 0;
+            const renderedKeys = new Set();
+            const sourceRows = [];
+            const defaultPromptByKey = {};
+
+            presets.forEach(function (preset) {
+                if (!preset || typeof preset !== 'object') {
+                    return;
+                }
+                const presetKey = String(preset.key || '');
+                if (presetKey) {
+                    defaultPromptByKey[presetKey] = String(preset.prompt || '');
+                }
+                const templateField = findFieldByKey(template, preset.key);
+                const row = $.extend({}, preset, templateField || {});
+                if (
+                    templateField &&
+                    String(templateField.prompt || '').trim() === '' &&
+                    String(preset.prompt || '').trim() !== ''
+                ) {
+                    row.prompt = String(preset.prompt || '');
+                }
+                if (!templateField && hasTemplateFields) {
+                    row.enabled = false;
+                }
+                sourceRows.push(row);
+                renderedKeys.add(String(preset.key || ''));
+            });
+            template.forEach(function (field) {
+                if (!field || typeof field !== 'object') {
+                    return;
+                }
+                const key = String(field.key || '');
+                if (renderedKeys.has(key)) {
+                    return;
+                }
+                if (String(field.prompt || '').trim() === '' && String(defaultPromptByKey[key] || '').trim() !== '') {
+                    field.prompt = String(defaultPromptByKey[key] || '');
+                }
+                sourceRows.push(field);
+            });
+
+            if (!sourceRows.length) {
+                if ($aiFieldEnabledCount.length) {
+                    $aiFieldEnabledCount.text('0');
+                }
+                if ($seoFieldEnabledCount.length) {
+                    $seoFieldEnabledCount.text('0');
+                }
+                if ($aiFieldRows.length) {
+                    $aiFieldRows.html('<p class="ucg-muted">' + escapeHtml(jsT('Для этого сценария нет доступных AI-полей.')) + '</p>');
+                }
+                if ($seoFieldRows.length) {
+                    $seoFieldRows.html('');
+                }
+                if ($seoFieldSection.length) {
+                    $seoFieldSection.prop('hidden', true).hide();
+                }
+                return;
+            }
+
+            const lengthOptions = lengthOptionsSource();
+            const standardRows = [];
+            const seoRows = [];
+
+            sourceRows.forEach(function (field) {
+                if (!field || typeof field !== 'object') {
+                    return;
+                }
+                const key = String(field.key || '').trim();
+                const targetField = String(field.target_field || '').trim();
+                if (isSeoAiField(targetField, key)) {
+                    seoRows.push(field);
+                    return;
+                }
+                standardRows.push(field);
+            });
+
+            const buildRowHtml = function (field, index) {
+                const key = String(field && field.key ? field.key : ('ai_' + (index + 1)));
+                const label = String(field && field.label ? field.label : key);
+                const enabled = !Object.prototype.hasOwnProperty.call(field || {}, 'enabled') || !!field.enabled;
+                const prompt = String(field && field.prompt ? field.prompt : '');
+                const targetField = String(field && field.target_field ? field.target_field : '');
+                const outputType = normalizeAiOutputType(targetField, key, field && field.output_type ? field.output_type : '');
+                const isImage = outputType === 'image';
+                const supportsLength = !isImage && aiFieldSupportsLength(targetField, key);
+                let lengthId = Number(field && field.length_option_id ? field.length_option_id : 0);
+                const maxChars = Number(field && field.max_chars ? field.max_chars : 0);
+                if (lengthId <= 0) {
+                    lengthId = Number(state.schema.default_length_option_id || 0);
+                }
+                if (lengthId <= 0 && lengthOptions.length) {
+                    lengthId = Number(lengthOptions[0] && lengthOptions[0].id ? lengthOptions[0].id : 0);
+                }
+
+                let lengthOptionsHtml = '';
+                lengthOptions.forEach(function (option) {
+                    const id = Number(option && option.id ? option.id : 0);
+                    if (!id) {
+                        return;
+                    }
+                    const optionLabel = option && option.name ? String(option.name) : ('#' + id);
+                    const selected = id === lengthId ? ' selected' : '';
+                    lengthOptionsHtml += '<option value="' + id + '"' + selected + '>' + escapeHtml(optionLabel) + '</option>';
+                });
+                if (!lengthOptionsHtml) {
+                    lengthOptionsHtml = '<option value="0">' + escapeHtml(jsT('Нет опций длины')) + '</option>';
+                }
+                const imageModels = imageGenerationModelsSource();
+                let imageModel = String(field && field.model ? field.model : 'auto').trim() || 'auto';
+                if (!imageModels.some(function (modelItem) { return String(modelItem && modelItem.id ? modelItem.id : '') === imageModel; })) {
+                    imageModel = 'auto';
+                }
+                let imageModelOptionsHtml = '';
+                imageModels.forEach(function (modelItem) {
+                    if (!modelItem || typeof modelItem !== 'object') {
+                        return;
+                    }
+                    const modelId = String(modelItem.id || '').trim();
+                    if (!modelId) {
+                        return;
+                    }
+                    const modelLabel = String(modelItem.name || modelId);
+                    const selected = modelId === imageModel ? ' selected' : '';
+                    imageModelOptionsHtml += '<option value="' + escapeHtml(modelId) + '"' + selected + '>' + escapeHtml(modelLabel) + '</option>';
+                });
+                if (!imageModelOptionsHtml) {
+                    imageModelOptionsHtml = '<option value="auto">auto</option>';
+                }
+                const imagesCountRaw = Number(field && field.images_count ? field.images_count : 1);
+                const imagesCount = Number.isFinite(imagesCountRaw) ? Math.max(1, Math.min(8, Math.round(imagesCountRaw))) : 1;
+                const aspectRatio = String(field && field.aspect_ratio ? field.aspect_ratio : '').trim();
+                const imageSize = String(field && field.image_size ? field.image_size : '').trim().toUpperCase();
+                const aspectOptions = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
+                let aspectOptionsHtml = '<option value="">' + escapeHtml(jsT('По умолчанию')) + '</option>';
+                aspectOptions.forEach(function (ratio) {
+                    const selected = ratio === aspectRatio ? ' selected' : '';
+                    aspectOptionsHtml += '<option value="' + escapeHtml(ratio) + '"' + selected + '>' + escapeHtml(ratio) + '</option>';
+                });
+                const sizeOptions = ['0.5K', '1K', '2K', '4K'];
+                let sizeOptionsHtml = '<option value="">' + escapeHtml(jsT('По умолчанию')) + '</option>';
+                sizeOptions.forEach(function (sizeItem) {
+                    const selected = sizeItem === imageSize ? ' selected' : '';
+                    sizeOptionsHtml += '<option value="' + escapeHtml(sizeItem) + '"' + selected + '>' + escapeHtml(sizeItem) + '</option>';
+                });
+                const initiallyOpen = false;
+                return '' +
+                    '<div class="ucg-ai-field-row' + (enabled ? '' : ' is-disabled') + '" data-key="' + escapeHtml(key) + '" data-target-field="' + escapeHtml(targetField) + '" data-max-chars="' + (maxChars > 0 ? maxChars : 0) + '" data-supports-length="' + (supportsLength ? '1' : '0') + '" data-output-type="' + escapeHtml(outputType) + '">' +
+                    '  <div class="ucg-ai-field-row__head">' +
+                    '    <label class="ucg-ai-field-check">' +
+                    '      <input type="checkbox" class="ucg-ai-field-enabled"' + (enabled ? ' checked' : '') + '>' +
+                    '      <span class="ucg-ai-field-label">' + escapeHtml(label) + '</span>' +
+                    '    </label>' +
+                    '    <div class="ucg-ai-field-row__meta">' +
+                    '      <button type="button" class="ucg-ai-field-toggle" aria-label="' + escapeHtml(jsT('Развернуть поле')) + '" aria-expanded="' + (initiallyOpen ? 'true' : 'false') + '">' +
+                    '        <span class="ucg-ai-field-toggle__label">' + escapeHtml(jsT('Настроить')) + '</span>' +
+                    '        <span class="dashicons dashicons-arrow-down-alt2" aria-hidden="true"></span>' +
+                    '      </button>' +
+                    '    </div>' +
+                    '  </div>' +
+                    '  <div class="ucg-ai-field-row__body"' + (initiallyOpen ? '' : ' hidden') + '>' +
+                    '    <div class="ucg-ai-field-row__grid">' +
+                    '      <label class="ucg-field ucg-ai-field-row__prompt-wrap">' +
+                    '        <span>' + escapeHtml(jsT('Промпт')) + '</span>' +
+                    '        <textarea class="ucg-wizard-template-input ucg-ai-field-prompt" rows="4" placeholder="' + escapeHtml(jsT('Инструкция для генерации этого поля')) + '">' + escapeHtml(prompt) + '</textarea>' +
+                    '      </label>' +
+                    '      <label class="ucg-field ucg-ai-field-row__length-wrap"' + (supportsLength ? '' : ' hidden') + '>' +
+                    '        <span>' + escapeHtml(jsT('Длина')) + '</span>' +
+                    '        <select class="ucg-ai-field-length ucg-enhanced-select" data-search-enabled="false">' + lengthOptionsHtml + '</select>' +
+                    '      </label>' +
+                    '      <label class="ucg-field ucg-ai-field-row__image-model-wrap"' + (isImage ? '' : ' hidden') + '>' +
+                    '        <span>' + escapeHtml(jsT('Модель изображения')) + '</span>' +
+                    '        <select class="ucg-ai-field-image-model ucg-enhanced-select" data-search-enabled="true" data-search-in-dropdown="true" data-search-placeholder="' + escapeHtml(jsT('Поиск модели...')) + '" data-search-fields="text,value" data-max-options="1000">' + imageModelOptionsHtml + '</select>' +
+                    '      </label>' +
+                    '      <label class="ucg-field ucg-ai-field-row__image-count-wrap"' + (isImage ? '' : ' hidden') + '>' +
+                    '        <span>' + escapeHtml(jsT('Кол-во изображений')) + '</span>' +
+                    '        <input type="number" class="ucg-ai-field-images-count" min="1" max="8" step="1" value="' + String(imagesCount) + '">' +
+                    '      </label>' +
+                    '      <label class="ucg-field ucg-ai-field-row__image-aspect-wrap"' + (isImage ? '' : ' hidden') + '>' +
+                    '        <span>' + escapeHtml(jsT('Соотношение сторон')) + '</span>' +
+                    '        <select class="ucg-ai-field-aspect-ratio ucg-enhanced-select" data-search-enabled="false">' + aspectOptionsHtml + '</select>' +
+                    '      </label>' +
+                    '      <label class="ucg-field ucg-ai-field-row__image-size-wrap"' + (isImage ? '' : ' hidden') + '>' +
+                    '        <span>' + escapeHtml(jsT('Размер')) + '</span>' +
+                    '        <select class="ucg-ai-field-image-size ucg-enhanced-select" data-search-enabled="false">' + sizeOptionsHtml + '</select>' +
+                    '      </label>' +
+                    '    </div>' +
+                    '  </div>' +
+                    '</div>';
+            };
+
+            let standardHtml = '';
+            standardRows.forEach(function (field, index) {
+                standardHtml += buildRowHtml(field, index);
+            });
+            let seoHtml = '';
+            seoRows.forEach(function (field, index) {
+                seoHtml += buildRowHtml(field, index);
+            });
+
+            if ($aiFieldRows.length) {
+                $aiFieldRows.html(
+                    standardHtml || ('<p class="ucg-muted">' + escapeHtml(jsT('Для этого сценария нет доступных AI-полей.')) + '</p>')
+                );
+            }
+            if ($seoFieldRows.length) {
+                $seoFieldRows.html(seoHtml);
+            }
+            if ($seoFieldSection.length) {
+                const hasSeoRows = seoRows.length > 0;
+                $seoFieldSection.prop('hidden', !hasSeoRows).toggle(hasSeoRows);
+            }
+
+            initEnhancedSelects(getAiRowsContainers().find('.ucg-enhanced-select'));
+            refreshAiFieldRowsUi();
+        }
+
+        function renderStaticFieldRows(staticFields) {
+            if (!$staticFieldRows.length) {
+                return;
+            }
+
+            const scenario = getScenario();
+            const isProductScenario = scenario === 'product_fields';
+            const presets = staticFieldPresets();
+            const runtimeFields = normalizeTemplateStaticFields(staticFields, scenario);
+            const sourceRows = [];
+            const renderedKeys = new Set();
+            presets.forEach(function (preset) {
+                if (!preset || typeof preset !== 'object') {
+                    return;
+                }
+                const key = String(preset.key || '');
+                if (isProductScenario && isRemovedProductStaticFieldKey(key)) {
+                    return;
+                }
+                sourceRows.push(mergeStaticPresetWithRuntime(preset, findFieldByKey(runtimeFields, key)));
+                renderedKeys.add(key);
+            });
+            runtimeFields.forEach(function (field, index) {
+                if (!field || typeof field !== 'object') {
+                    return;
+                }
+                const key = String(field.key || ('static_' + (index + 1)));
+                if (isProductScenario && isRemovedProductStaticFieldKey(key)) {
+                    return;
+                }
+                if (renderedKeys.has(key)) {
+                    return;
+                }
+                sourceRows.push(field);
+            });
+
+            if (!sourceRows.length) {
+                if ($staticFieldEnabledCount.length) {
+                    $staticFieldEnabledCount.text('0');
+                }
+                $staticFieldRows.html('<p class="ucg-muted">' + escapeHtml(jsT('Для этого типа записей нет static-полей.')) + '</p>');
+                return;
+            }
+
+            let html = '';
+            sourceRows.forEach(function (field, index) {
+                const key = String(field && field.key ? field.key : ('static_' + (index + 1)));
+                const label = String(field && field.label ? field.label : key);
+                const enabled = !!(field && field.enabled);
+                const targetField = String(field && field.target_field ? field.target_field : '');
+                const inputType = String(field && field.input_type ? field.input_type : 'text');
+                const options = Array.isArray(field && field.options) ? field.options : [];
+                const value = field && Object.prototype.hasOwnProperty.call(field, 'value') ? field.value : '';
+                const placeholder = String(field && field.placeholder ? field.placeholder : '');
+                const hint = String(field && field.hint ? field.hint : '');
+                let controlHtml = '';
+
+                if (inputType === 'taxonomy_checklist') {
+                    const selectedValues = new Set(normalizeArrayFieldValue(value));
+                    const checklistNodes = normalizeTaxonomyChecklistOptions(options);
+                    if (checklistNodes.length) {
+                        controlHtml = buildTaxonomyChecklistHtml(checklistNodes, selectedValues, 0);
+                    } else {
+                        controlHtml = '<p class="ucg-muted">' + escapeHtml(jsT('Нет доступных терминов.')) + '</p>';
+                    }
+                } else if (inputType === 'select' || inputType === 'multiselect') {
+                    const selectedValues = inputType === 'multiselect'
+                        ? normalizeArrayFieldValue(value)
+                        : [String(value == null ? '' : value)];
+                    let optionsHtml = '';
+                    options.forEach(function (option) {
+                        const optionValue = option && Object.prototype.hasOwnProperty.call(option, 'value')
+                            ? String(option.value)
+                            : '';
+                        const optionLabel = option && Object.prototype.hasOwnProperty.call(option, 'label')
+                            ? String(option.label)
+                            : optionValue;
+                        const selected = selectedValues.indexOf(optionValue) !== -1 ? ' selected' : '';
+                        optionsHtml += '<option value="' + escapeHtml(optionValue) + '"' + selected + '>' + escapeHtml(optionLabel) + '</option>';
+                    });
+                    const multipleAttr = inputType === 'multiselect' ? ' multiple size="5"' : '';
+                    const cls = inputType === 'multiselect'
+                        ? 'ucg-static-field-value ucg-static-field-value--multi'
+                        : 'ucg-static-field-value ucg-enhanced-select';
+                    const selectAttrs = inputType === 'multiselect' ? '' : ' data-search-enabled="false"';
+                    controlHtml = '<select class="' + cls + '"' + selectAttrs + multipleAttr + '>' + optionsHtml + '</select>';
+                } else if (inputType === 'number') {
+                    controlHtml = '<input type="number" class="ucg-static-field-value" value="' + escapeHtml(String(value == null ? '' : value)) + '" step="0.01" placeholder="' + escapeHtml(placeholder || jsT('Значение')) + '">';
+                } else {
+                    controlHtml = '<input type="text" class="ucg-static-field-value" value="' + escapeHtml(String(value == null ? '' : value)) + '" placeholder="' + escapeHtml(placeholder || jsT('Значение')) + '">';
+                }
+
+                html += '' +
+                    '<div class="ucg-static-field-row' + (enabled ? '' : ' is-disabled') + '" data-key="' + escapeHtml(key) + '" data-target-field="' + escapeHtml(targetField) + '" data-input-type="' + escapeHtml(inputType) + '">' +
+                    '  <div class="ucg-static-field-row__head">' +
+                    '    <label class="ucg-static-field-check">' +
+                    '      <input type="checkbox" class="ucg-static-field-enabled"' + (enabled ? ' checked' : '') + '>' +
+                    '      <span class="ucg-static-field-label">' + escapeHtml(label) + '</span>' +
+                    '    </label>' +
+                    '    <span class="ucg-static-field-value-badge">—</span>' +
+                    '  </div>' +
+                    '  <div class="ucg-static-field-row__body"' + (enabled ? '' : ' hidden') + '>' +
+                    '    <div class="ucg-static-field-row__control">' + controlHtml + '</div>' +
+                    (hint ? ('<p class="ucg-muted ucg-field-hint">' + escapeHtml(hint) + '</p>') : '') +
+                    '  </div>' +
+                    '</div>';
+            });
+
+            $staticFieldRows.html(html);
+            initEnhancedSelects($staticFieldRows.find('.ucg-enhanced-select'));
+            refreshStaticFieldRowsUi();
+        }
+
+        function collectAiFieldsForRun() {
+            const fields = [];
+            if (!getAiRowsContainers().length) {
+                return fields;
+            }
+
+            getAiRowsContainers().find('.ucg-ai-field-row').each(function () {
+                const $row = $(this);
+                const key = String($row.data('key') || '');
+                const targetField = String($row.attr('data-target-field') || '');
+                const maxChars = Number($row.attr('data-max-chars') || 0);
+                const enabled = $row.find('.ucg-ai-field-enabled').is(':checked');
+                const label = String($row.find('.ucg-ai-field-label').first().text() || '').trim();
+                const prompt = String($row.find('.ucg-ai-field-prompt').val() || '').trim();
+                const lengthOptionId = Number($row.find('.ucg-ai-field-length').val() || 0);
+                const outputType = normalizeAiOutputType(targetField, key, $row.attr('data-output-type') || 'text');
+                const imageModel = String($row.find('.ucg-ai-field-image-model').val() || 'auto').trim() || 'auto';
+                const imagesCountRaw = Number($row.find('.ucg-ai-field-images-count').val() || 1);
+                const imagesCount = Number.isFinite(imagesCountRaw) ? Math.max(1, Math.min(8, Math.round(imagesCountRaw))) : 1;
+                const aspectRatio = String($row.find('.ucg-ai-field-aspect-ratio').val() || '').trim();
+                const imageSize = String($row.find('.ucg-ai-field-image-size').val() || '').trim().toUpperCase();
+
+                fields.push({
+                    key: key,
+                    label: label || key,
+                    enabled: enabled,
+                    target_field: targetField,
+                    prompt: prompt,
+                    length_option_id: lengthOptionId > 0 ? lengthOptionId : 0,
+                    max_chars: maxChars > 0 ? maxChars : 0,
+                    output_type: outputType,
+                    model: imageModel,
+                    images_count: imagesCount,
+                    aspect_ratio: aspectRatio,
+                    image_size: imageSize
+                });
+            });
+
+            return fields;
+        }
+
+        function collectStaticFieldsForRun() {
+            const fields = [];
+            if (!$staticFieldRows.length) {
+                return fields;
+            }
+
+            $staticFieldRows.find('.ucg-static-field-row').each(function () {
+                const $row = $(this);
+                const key = String($row.data('key') || '');
+                const targetField = String($row.attr('data-target-field') || '');
+                const inputType = String($row.attr('data-input-type') || 'text');
+                const enabled = $row.find('.ucg-static-field-enabled').is(':checked');
+                const label = String($row.find('.ucg-static-field-label').first().text() || '').trim();
+                const $input = $row.find('.ucg-static-field-value');
+                let value = '';
+                if (inputType === 'taxonomy_checklist') {
+                    value = [];
+                    $row.find('.ucg-static-field-value-check:checked').each(function () {
+                        const selectedValue = String($(this).val() == null ? '' : $(this).val()).trim();
+                        if (selectedValue && value.indexOf(selectedValue) === -1) {
+                            value.push(selectedValue);
+                        }
+                    });
+                } else if (inputType === 'multiselect') {
+                    value = normalizeArrayFieldValue($input.val());
+                } else {
+                    value = String($input.val() == null ? '' : $input.val()).trim();
+                }
+
+                fields.push({
+                    key: key,
+                    label: label || key,
+                    enabled: enabled,
+                    target_field: targetField,
+                    value: value
+                });
+            });
+
+            return fields;
+        }
+
+        function hasEnabledStaticFields(fields) {
+            if (!Array.isArray(fields)) {
+                return false;
+            }
+            for (let i = 0; i < fields.length; i += 1) {
+                const field = fields[i];
+                if (!field || typeof field !== 'object' || !field.enabled) {
+                    continue;
+                }
+                if (Array.isArray(field.value)) {
+                    if (field.value.length > 0) {
+                        return true;
+                    }
+                    continue;
+                }
+                if (String(field.value == null ? '' : field.value).trim() !== '') {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function buildSeoAiFieldsForRun(seoTitlePrompt, seoDescriptionPrompt, fallbackLengthOptionId) {
+            const source = Array.isArray(state.templateAiFields) ? state.templateAiFields : [];
+            const fallbackLength = Number(fallbackLengthOptionId || 0);
+            const fieldsByTarget = {
+                title: null,
+                description: null
+            };
+
+            source.forEach(function (field) {
+                if (!field || typeof field !== 'object') {
+                    return;
+                }
+                const target = String(field.target_field || '');
+                if (target === 'seo_field:title' && !fieldsByTarget.title) {
+                    fieldsByTarget.title = $.extend({}, field);
+                } else if (target === 'seo_field:description' && !fieldsByTarget.description) {
+                    fieldsByTarget.description = $.extend({}, field);
+                }
+            });
+
+            if (!fieldsByTarget.title) {
+                fieldsByTarget.title = {
+                    key: 'seo_title',
+                    label: jsT('SEO Title'),
+                    target_field: 'seo_field:title',
+                    length_option_id: fallbackLength > 0 ? fallbackLength : 0,
+                    max_chars: 70
+                };
+            }
+            if (!fieldsByTarget.description) {
+                fieldsByTarget.description = {
+                    key: 'seo_description',
+                    label: jsT('SEO Description'),
+                    target_field: 'seo_field:description',
+                    length_option_id: fallbackLength > 0 ? fallbackLength : 0,
+                    max_chars: 160
+                };
+            }
+
+            fieldsByTarget.title.enabled = true;
+            fieldsByTarget.title.prompt = String(seoTitlePrompt || '');
+            fieldsByTarget.title.length_option_id = Number(fieldsByTarget.title.length_option_id || 0) > 0
+                ? Number(fieldsByTarget.title.length_option_id || 0)
+                : (fallbackLength > 0 ? fallbackLength : 0);
+            fieldsByTarget.title.max_chars = Number(fieldsByTarget.title.max_chars || 0) > 0
+                ? Number(fieldsByTarget.title.max_chars || 0)
+                : 70;
+
+            fieldsByTarget.description.enabled = true;
+            fieldsByTarget.description.prompt = String(seoDescriptionPrompt || '');
+            fieldsByTarget.description.length_option_id = Number(fieldsByTarget.description.length_option_id || 0) > 0
+                ? Number(fieldsByTarget.description.length_option_id || 0)
+                : (fallbackLength > 0 ? fallbackLength : 0);
+            fieldsByTarget.description.max_chars = Number(fieldsByTarget.description.max_chars || 0) > 0
+                ? Number(fieldsByTarget.description.max_chars || 0)
+                : 160;
+
+            return [fieldsByTarget.title, fieldsByTarget.description];
+        }
+
         function activeTemplateInput() {
             if ($activeTemplateTextarea && $activeTemplateTextarea.length && $activeTemplateTextarea.is(':visible')) {
                 return $activeTemplateTextarea;
+            }
+            const $multiPrompt = getAiRowsContainers().find('.ucg-ai-field-prompt:visible').first();
+            if ($multiPrompt.length) {
+                return $multiPrompt;
             }
             if ($templateBody.is(':visible')) {
                 return $templateBody;
@@ -1481,24 +3354,43 @@ jQuery(function ($) {
 
         function updateScenarioTemplateInputs() {
             const scenario = getScenario();
+            applyPostTypeSelectionVisibility(scenario);
             const isSeo = scenario === 'seo_tags';
+            const isMulti = scenarioSupportsMultiFields(scenario);
+            if ($templatePromptCard.length) {
+                $templatePromptCard.toggle(!isMulti);
+            }
+            if ($templateTokenCard.length) {
+                $templateTokenCard.toggle(!isMulti);
+            }
             if ($templateBodyStandardWrap.length) {
-                $templateBodyStandardWrap.toggle(!isSeo);
+                $templateBodyStandardWrap.toggle(!isSeo && !isMulti);
             }
             if ($templateBodySeoWrap.length) {
                 $templateBodySeoWrap.prop('hidden', !isSeo).toggle(isSeo);
             }
+            if ($templateBodyMultiWrap.length) {
+                $templateBodyMultiWrap.prop('hidden', !isMulti).toggle(isMulti);
+            }
             if (isSeo) {
                 $activeTemplateTextarea = $templateBodySeoTitle;
+            } else if (isMulti) {
+                $activeTemplateTextarea = getAiRowsContainers().find('.ucg-ai-field-prompt').first();
             } else {
                 $activeTemplateTextarea = $templateBody;
             }
             if ($lengthControlsWrap.length) {
-                $lengthControlsWrap.toggle(!isSeo);
+                $lengthControlsWrap.toggle(!isSeo && !isMulti);
             }
             if ($seoGuidelines.length) {
                 $seoGuidelines.prop('hidden', !isSeo).toggle(isSeo);
             }
+            if (isMulti) {
+                renderAiFieldRows(state.templateAiFields);
+                renderStaticFieldRows(state.templateStaticFields);
+                $activeTemplateTextarea = getAiRowsContainers().find('.ucg-ai-field-prompt').first();
+            }
+            applyStep2ModeVisibility();
             togglePublishDateRangeControls(scenario);
             applyItemsPerPostVisibility(scenario);
             toggleWooRatingRangeControls(scenario);
@@ -1508,19 +3400,14 @@ jQuery(function ($) {
             const settings = state.schema && state.schema.settings ? state.schema.settings : {};
             const langRaw = settings && settings.default_language ? String(settings.default_language) : 'auto';
             const toneRaw = settings && settings.default_tone ? String(settings.default_tone) : 'neutral';
-            const uniquenessRaw = settings && settings.default_uniqueness ? String(settings.default_uniqueness) : 'medium';
             const language = (langRaw === 'auto' || langRaw === 'ru' || langRaw === 'en') ? langRaw : 'auto';
             const tone = (toneRaw === 'neutral' || toneRaw === 'official' || toneRaw === 'friendly') ? toneRaw : 'neutral';
-            const uniqueness = (uniquenessRaw === 'low' || uniquenessRaw === 'medium' || uniquenessRaw === 'high') ? uniquenessRaw : 'medium';
 
             if ($styleLanguage.length) {
                 setEnhancedSelectValue($styleLanguage, language);
             }
             if ($styleTone.length) {
                 setEnhancedSelectValue($styleTone, tone);
-            }
-            if ($styleUniqueness.length) {
-                setEnhancedSelectValue($styleUniqueness, uniqueness);
             }
         }
 
@@ -1866,9 +3753,34 @@ jQuery(function ($) {
                 return;
             }
 
+            function formatItemStatusLabel(log) {
+                const normalized = String(log && log.status ? log.status : '').trim().toLowerCase();
+                const fallbackLabel = log && log.status_label ? String(log.status_label).trim() : '';
+                if (normalized === 'approved') {
+                    return jsT('Применено');
+                }
+                if (normalized === 'generated') {
+                    return jsT('Сгенерировано (ожидает проверки)');
+                }
+                if (normalized === 'failed') {
+                    return jsT('Ошибка');
+                }
+                if (normalized === 'queued') {
+                    return jsT('В очереди');
+                }
+                if (normalized === 'running') {
+                    return jsT('Обрабатывается');
+                }
+                const fallbackNormalized = fallbackLabel.toLowerCase();
+                if (fallbackNormalized === jsT('Одобрено').toLowerCase() || fallbackNormalized === 'approved') {
+                    return jsT('Применено');
+                }
+                return fallbackLabel || jsT('Статус');
+            }
+
             const lines = logs.map(function (log) {
                 const postId = Number(log && log.post_id ? log.post_id : 0);
-                const statusLabel = log && log.status_label ? String(log.status_label) : jsT('Статус');
+                const statusLabel = formatItemStatusLabel(log);
                 const error = log && log.error_message ? String(log.error_message) : '';
                 const timestamp = log && log.updated_at ? String(log.updated_at) : '';
                 let text = timestamp ? ('[' + timestamp + '] ') : '';
@@ -2000,10 +3912,15 @@ jQuery(function ($) {
             if (step === 3) {
                 renderRunSummary();
                 setRunStatus('', false);
+            } else {
+                cancelQuoteRefreshRequest();
             }
 
-            if (step === 2 && state.total === 0 && normalizeFilters().length === 0) {
-                previewPosts(1, $('#ucg-preview-posts'));
+            if (step === 2) {
+                applyStep2ModeVisibility();
+                if (!isCreateNewMode() && state.total === 0 && normalizeFilters().length === 0) {
+                    previewPosts(1, $('#ucg-preview-posts'));
+                }
             }
         }
 
@@ -2048,9 +3965,13 @@ jQuery(function ($) {
                     : jsT('Целевое поле');
                 $targetFieldLabel.text(targetLabel);
             }
-            const emptyOptionLabel = (state.schema && String(state.schema.scenario || '') === 'seo_tags')
-                ? jsT('Выберите SEO-плагин')
-                : jsT('Выберите поле');
+            const schemaScenario = state.schema ? String(state.schema.scenario || '') : '';
+            let emptyOptionLabel = jsT('Выберите поле');
+            if (schemaScenario === 'seo_tags') {
+                emptyOptionLabel = jsT('Выберите SEO-плагин');
+            } else if (scenarioSupportsMultiFields(schemaScenario)) {
+                emptyOptionLabel = jsT('Авто (по выбранным полям)');
+            }
             let html = '<option value="">' + escapeHtml(emptyOptionLabel) + '</option>';
             sourceFields.forEach(function (field) {
                 const value = field && field.value ? String(field.value) : '';
@@ -2107,6 +4028,8 @@ jQuery(function ($) {
             $templateBody.val('');
             $templateBodySeoTitle.val('');
             $templateBodySeoDescription.val('');
+            state.templateAiFields = [];
+            state.templateStaticFields = [];
             $templateName.val('');
             $saveTemplateChanges.prop('checked', false);
             updateTemplateMode();
@@ -2186,9 +4109,113 @@ jQuery(function ($) {
             return Number(map[first] || 0);
         }
 
+        function findImageModelById(modelId) {
+            const normalizedId = String(modelId || 'auto').trim() || 'auto';
+            const models = imageGenerationModelsSource();
+            for (let i = 0; i < models.length; i += 1) {
+                const item = models[i];
+                if (!item || typeof item !== 'object') {
+                    continue;
+                }
+                if (String(item.id || '') === normalizedId) {
+                    return item;
+                }
+            }
+            for (let j = 0; j < models.length; j += 1) {
+                const fallback = models[j];
+                if (!fallback || typeof fallback !== 'object') {
+                    continue;
+                }
+                if (String(fallback.id || '') === 'auto') {
+                    return fallback;
+                }
+            }
+            return models.length ? models[0] : null;
+        }
+
+        function estimateImageFieldCredits(field) {
+            const model = findImageModelById(field && field.model ? field.model : 'auto');
+            const multiplier = Number(model && model.multiplier ? model.multiplier : 1);
+            const safeMultiplier = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+            const imagesCountRaw = Number(field && field.images_count ? field.images_count : 1);
+            const imagesCount = Number.isFinite(imagesCountRaw) ? Math.max(1, Math.min(8, Math.round(imagesCountRaw))) : 1;
+            return imagesCount * safeMultiplier;
+        }
+
+        function normalizeModelModalities(value, fallback) {
+            const fallbackValues = Array.isArray(fallback) ? fallback : [];
+            const source = Array.isArray(value)
+                ? value
+                : (typeof value === 'string' ? String(value).split(',') : []);
+            const normalized = [];
+            const seen = new Set();
+            source.forEach(function (item) {
+                const token = String(item || '').trim().toLowerCase().replace(/[^a-z0-9_\-+]/g, '');
+                if (!token || seen.has(token)) {
+                    return;
+                }
+                seen.add(token);
+                normalized.push(token);
+            });
+            if (normalized.length) {
+                return normalized;
+            }
+            return fallbackValues.slice();
+        }
+
+        function isTextToTextModelModality(modelItem) {
+            if (!modelItem || typeof modelItem !== 'object') {
+                return true;
+            }
+            const inputModalities = normalizeModelModalities(modelItem.input_modalities, ['text']);
+            const outputModalities = normalizeModelModalities(modelItem.output_modalities, ['text']);
+            return inputModalities.length === 1 &&
+                outputModalities.length === 1 &&
+                inputModalities[0] === 'text' &&
+                outputModalities[0] === 'text';
+        }
+
+        function modelArchitectureLabel(modelItem) {
+            if (!modelItem || typeof modelItem !== 'object') {
+                return '';
+            }
+            const raw = modelItem.architecture_modality ? String(modelItem.architecture_modality).trim() : '';
+            if (!raw) {
+                return '';
+            }
+            const normalizedRaw = raw.toLowerCase().replace(/\s+/g, '');
+            if (normalizedRaw === 'text->text' || normalizedRaw === 'text-to-text') {
+                return '';
+            }
+            if (isTextToTextModelModality(modelItem)) {
+                return '';
+            }
+            return raw;
+        }
+
+        function generationModelsForScenario(scenario) {
+            const models = Array.isArray(state.schema.generation_models) ? state.schema.generation_models : [];
+            return models.filter(function (item) {
+                if (!item || typeof item !== 'object') {
+                    return false;
+                }
+                const id = String(item.id || '').trim();
+                const name = String(item.name || id).trim();
+                return id !== '' && name !== '';
+            });
+        }
+
+        function modelsForScenario(scenario) {
+            const normalized = String(scenario || '').trim().toLowerCase();
+            if (normalized === 'image_generation') {
+                return imageGenerationModelsSource();
+            }
+            return generationModelsForScenario(normalized);
+        }
+
         function activeModelItem() {
             const selectedModelId = getEnhancedSelectValue($modelSelect) || String(state.defaultModel || 'auto');
-            const models = Array.isArray(state.schema.generation_models) ? state.schema.generation_models : [];
+            const models = modelsForScenario(getScenario());
             for (let i = 0; i < models.length; i += 1) {
                 const item = models[i];
                 if (!item || typeof item !== 'object') {
@@ -2212,19 +4239,106 @@ jQuery(function ($) {
 
             const scenario = getScenario();
             const planned = getPlannedCount();
-            const unitsPerRecord = scenarioSupportsItemsPerPost(scenario) ? normalizeItemsPerPost($itemsPerPost.val()) : 1;
-            const plannedUnits = planned > 0 ? (planned * unitsPerRecord) : 0;
-            const lengthOptionId = Number($lengthOption.val() || 0);
             const model = activeModelItem();
-            const creditsPerUnit = estimateCreditsByLength(model, lengthOptionId);
-            const totalCredits = plannedUnits > 0 ? (plannedUnits * creditsPerUnit) : 0;
+            let unitsPerRecord = scenarioSupportsItemsPerPost(scenario) ? normalizeItemsPerPost($itemsPerPost.val()) : 1;
+            let creditsPerUnit = 0;
+            let totalCredits = 0;
+            let unitCountLabel = scenario === 'seo_tags' ? jsT('Пакетов') : jsT('Полей');
+            let perUnitLabel = scenario === 'seo_tags'
+                ? jsT('Цена за пакет')
+                : jsT('Цена за поле');
+            let formulaText = '';
+            const quoteContext = state.step === 3 ? buildRunQuoteRequestContext() : null;
+            const quoteSignature = quoteContext && quoteContext.signature ? String(quoteContext.signature) : '';
+            const quoteData = state.quoteEstimate && state.quoteEstimate.signature === quoteSignature
+                ? state.quoteEstimate.data
+                : null;
+            const quoteEstimate = quoteData && quoteData.estimate && typeof quoteData.estimate === 'object'
+                ? quoteData.estimate
+                : null;
+            const hasQuoteEstimate = !!quoteEstimate;
+            let quoteTotalP90 = 0;
+
+            if (scenarioSupportsMultiFields(scenario)) {
+                const hasRenderedAiRows = getAiRowsContainers().length && getAiRowsContainers().find('.ucg-ai-field-row').length > 0;
+                let aiFields = collectAiFieldsForRun().filter(function (field) {
+                    return !!(field && field.enabled && String(field.prompt || '').trim() !== '');
+                });
+                if (!hasRenderedAiRows && !aiFields.length) {
+                    aiFields = normalizeTemplateAiFields(state.templateAiFields).filter(function (field) {
+                        return !!(field && field.enabled && String(field.prompt || '').trim() !== '');
+                    });
+                }
+                unitsPerRecord = aiFields.length;
+                let perRecordCredits = 0;
+                const fieldCostParts = [];
+                aiFields.forEach(function (field) {
+                    const outputType = normalizeAiOutputType(field && field.target_field ? field.target_field : '', field && field.key ? field.key : '', field && field.output_type ? field.output_type : '');
+                    let fieldCredits = 0;
+                    if (outputType === 'image') {
+                        fieldCredits = estimateImageFieldCredits(field);
+                    } else {
+                        fieldCredits = estimateCreditsByLength(model, Number(field.length_option_id || 0));
+                    }
+                    perRecordCredits += fieldCredits;
+                    const fieldLabel = String(field.label || field.key || jsT('Поле'));
+                    fieldCostParts.push(fieldLabel + ': ~' + formatCreditsValue(fieldCredits, 2) + ' ' + jsT('кр.'));
+                });
+                creditsPerUnit = perRecordCredits;
+                totalCredits = planned > 0 ? (planned * perRecordCredits) : 0;
+                unitCountLabel = jsT('AI-полей/запись');
+                perUnitLabel = jsT('Цена за запись');
+                const recordWord = pluralRu(planned, [jsT('запись'), jsT('записи'), jsT('записей')]);
+                formulaText = String(planned) + ' ' + recordWord + ' × ~' + formatCreditsValue(perRecordCredits, 2) + ' ' + jsT('кр.') +
+                    ' = ~' + formatCreditsValue(totalCredits, 2) + ' ' + jsT('кр.');
+                if (fieldCostParts.length) {
+                    formulaText += '\n' + fieldCostParts.join(' + ');
+                }
+            } else {
+                const plannedUnits = planned > 0 ? (planned * unitsPerRecord) : 0;
+                const lengthOptionId = Number($lengthOption.val() || 0);
+                creditsPerUnit = estimateCreditsByLength(model, lengthOptionId);
+                totalCredits = plannedUnits > 0 ? (plannedUnits * creditsPerUnit) : 0;
+                const recordWord = pluralRu(planned, [jsT('запись'), jsT('записи'), jsT('записей')]);
+                const unitForms = scenario === 'seo_tags'
+                    ? [jsT('пакет'), jsT('пакета'), jsT('пакетов')]
+                    : [jsT('поле'), jsT('поля'), jsT('полей')];
+                const unitWord = pluralRu(unitsPerRecord, unitForms);
+                formulaText = String(planned) + ' ' + recordWord + ' × ' + String(unitsPerRecord) + ' ' + unitWord + ' × ~' +
+                    formatCreditsValue(creditsPerUnit, 2) + ' ' + jsT('кр.') + ' = ~' + formatCreditsValue(totalCredits, 2) + ' ' + jsT('кр.');
+            }
+
+            if (hasQuoteEstimate) {
+                const quotePerUnitP50 = Number(quoteEstimate.credits_per_unit_p50 || 0);
+                const quotePerUnitP90 = Number(quoteEstimate.credits_per_unit_p90 || 0);
+                const quotePerRecordP50 = Number(quoteEstimate.credits_per_record_p50 || 0);
+                const quotePerRecordP90 = Number(quoteEstimate.credits_per_record_p90 || 0);
+                const quoteTotalP50 = Number(quoteEstimate.total_credits_p50 || 0);
+                const quoteTotalP90Value = Number(quoteEstimate.total_credits_p90 || 0);
+
+                creditsPerUnit = scenarioSupportsMultiFields(scenario) ? quotePerRecordP50 : quotePerUnitP50;
+                totalCredits = quoteTotalP50;
+                quoteTotalP90 = Math.max(quoteTotalP50, quoteTotalP90Value);
+
+                const recordWord = pluralRu(planned, [jsT('запись'), jsT('записи'), jsT('записей')]);
+                if (scenarioSupportsMultiFields(scenario)) {
+                    formulaText = String(planned) + ' ' + recordWord + ' × ~' +
+                        formatCreditsValue(quotePerRecordP50, 2) + ' ' + jsT('кр.') + ' = ~' + formatCreditsValue(quoteTotalP50, 2) + ' ' + jsT('кр.');
+                } else {
+                    const unitForms = scenario === 'seo_tags'
+                        ? [jsT('пакет'), jsT('пакета'), jsT('пакетов')]
+                        : [jsT('поле'), jsT('поля'), jsT('полей')];
+                    const unitWord = pluralRu(unitsPerRecord, unitForms);
+                    formulaText = String(planned) + ' ' + recordWord + ' × ' + String(unitsPerRecord) + ' ' + unitWord + ' × ~' +
+                        formatCreditsValue(quotePerUnitP50, 2) + ' ' + jsT('кр.') + ' = ~' + formatCreditsValue(quoteTotalP50, 2) + ' ' + jsT('кр.');
+                }
+                if (quoteTotalP90 > quoteTotalP50) {
+                    formulaText += '\n' + jsT('Верхняя оценка: ~') + formatCreditsValue(quoteTotalP90, 2) + ' ' + jsT('кр.');
+                }
+            }
             const modelName = model && model.name ? String(model.name) : jsT('По умолчанию');
             const provider = model && model.provider ? String(model.provider) : '';
             const resolved = model && model.resolved_model ? String(model.resolved_model) : '';
-            const unitCountLabel = scenario === 'seo_tags' ? jsT('Пакетов') : jsT('Полей');
-            const perUnitLabel = scenario === 'seo_tags'
-                ? jsT('Цена за пакет')
-                : jsT('Цена за поле');
 
             let modelBase = modelName || provider || jsT('По умолчанию');
             const providerSuffix = provider ? (' (' + provider + ')') : '';
@@ -2237,23 +4351,30 @@ jQuery(function ($) {
                 modelDetails += ' (' + resolved + ')';
             }
 
-            const recordWord = pluralRu(planned, [jsT('запись'), jsT('записи'), jsT('записей')]);
-            const unitForms = scenario === 'seo_tags'
-                ? [jsT('пакет'), jsT('пакета'), jsT('пакетов')]
-                : [jsT('поле'), jsT('поля'), jsT('полей')];
-            const unitWord = pluralRu(unitsPerRecord, unitForms);
-            const formulaText = String(planned) + ' ' + recordWord + ' × ' + String(unitsPerRecord) + ' ' + unitWord + ' × ~' +
-                formatCreditsValue(creditsPerUnit, 2) + ' ' + jsT('кр.') + ' = ~' + formatCreditsValue(totalCredits, 2) + ' ' + jsT('кр.');
-
             const modelRowValue = '' +
                 '<span class="ucg-run-summary__model-text">' + escapeHtml(modelDetails) + '</span>' +
                 '<button type="button" class="ucg-run-summary__model-change" id="ucg-run-summary-change-model">' + escapeHtml(jsT('Сменить ↗')) + '</button>';
+
+            let perUnitDisplay = '~' + formatCreditsValue(creditsPerUnit, 2) + ' ' + jsT('кр.');
+            if (hasQuoteEstimate) {
+                const quotePerUnitP90 = scenarioSupportsMultiFields(scenario)
+                    ? Number(quoteEstimate.credits_per_record_p90 || 0)
+                    : Number(quoteEstimate.credits_per_unit_p90 || 0);
+                if (quotePerUnitP90 > creditsPerUnit) {
+                    perUnitDisplay += ' (' + jsT('до ~') + formatCreditsValue(quotePerUnitP90, 2) + ' ' + jsT('кр.') + ')';
+                }
+            }
 
             let rowsHtml = '' +
                 '<li class="ucg-run-summary__row ucg-run-summary__row--model"><span>' + escapeHtml(jsT('Модель')) + '</span><strong class="ucg-run-summary__model-value">' + modelRowValue + '</strong></li>' +
                 '<li class="ucg-run-summary__row"><span>' + escapeHtml(jsT('Записей')) + '</span><strong>' + escapeHtml(String(planned)) + '</strong></li>' +
                 '<li class="ucg-run-summary__row"><span>' + escapeHtml(unitCountLabel) + '</span><strong>' + escapeHtml(String(unitsPerRecord)) + '</strong></li>' +
-                '<li class="ucg-run-summary__row"><span>' + escapeHtml(perUnitLabel) + '</span><strong>~' + escapeHtml(formatCreditsValue(creditsPerUnit, 2)) + ' ' + escapeHtml(jsT('кр.')) + '</strong></li>';
+                '<li class="ucg-run-summary__row"><span>' + escapeHtml(perUnitLabel) + '</span><strong>' + escapeHtml(perUnitDisplay) + '</strong></li>';
+
+            let totalDisplay = '~' + formatCreditsValue(totalCredits, 2) + ' ' + jsT('кр.');
+            if (hasQuoteEstimate && quoteTotalP90 > totalCredits) {
+                totalDisplay += ' (' + jsT('до ~') + formatCreditsValue(quoteTotalP90, 2) + ' ' + jsT('кр.') + ')';
+            }
 
             let html = '' +
                 '<div class="ucg-run-summary__top">' +
@@ -2267,25 +4388,32 @@ jQuery(function ($) {
                 '<span class="dashicons dashicons-editor-help" aria-hidden="true"></span>' +
                 '</button>' +
                 '</span>' +
-                '<strong>~' + escapeHtml(formatCreditsValue(totalCredits, 2)) + ' ' + escapeHtml(jsT('кр.')) + '</strong>' +
+                '<strong>' + escapeHtml(totalDisplay) + '</strong>' +
                 '</div>';
 
             if (planned <= 0) {
                 html += '<p class="ucg-run-summary__note">' + escapeHtml(jsT('Нет записей для запуска.')) + '</p>';
+            } else if (hasQuoteEstimate) {
+                html += '<p class="ucg-run-summary__note">' + escapeHtml(jsT('Показываем базовую оценку и верхнюю границу (безопасный максимум).')) + '</p>';
+            } else if (state.quoteRequestInFlight && state.quoteRequestSignature === quoteSignature) {
+                html += '<p class="ucg-run-summary__note">' + escapeHtml(jsT('Уточняем стоимость через API…')) + '</p>';
+            } else if (state.quoteError && state.quoteFailedSignature === quoteSignature) {
+                html += '<p class="ucg-run-summary__note">' + escapeHtml(jsT('Показана локальная оценка.')) + ' ' + escapeHtml(state.quoteError) + '</p>';
             }
 
             $runSummary.html(html);
             if ($step3Total.length) {
                 $step3Total.html(
                     escapeHtml(jsT('Итого: ')) +
-                    '<strong>~' + escapeHtml(formatCreditsValue(totalCredits, 2)) + ' ' + escapeHtml(jsT('кр.')) + '</strong>'
+                    '<strong>' + escapeHtml(totalDisplay) + '</strong>'
                 );
             }
+            scheduleRunQuoteRefresh();
         }
 
         function renderGenerationModels() {
-            const models = Array.isArray(state.schema.generation_models) ? state.schema.generation_models : [];
-            const lengthOptionId = Number($lengthOption.val() || 0);
+            const scenario = getScenario();
+            const models = modelsForScenario(scenario);
             const currentModel = getEnhancedSelectValue($modelSelect) || String(state.defaultModel || 'auto');
             let html = '';
             let selectedExists = false;
@@ -2296,11 +4424,9 @@ jQuery(function ($) {
             state.defaultModel = defaultModel;
 
             if (!models.length) {
-                html = '<option value="auto">' + escapeHtml(jsT('По умолчанию')) + '</option>';
+                html = '<option value="auto">' + escapeHtml(jsT('Нет подходящих моделей (авто)')) + '</option>';
+                selectedExists = true;
             } else {
-                const unitLabel = state.schema && state.schema.generation_unit_label
-                    ? String(state.schema.generation_unit_label)
-                    : jsT('1 единица');
                 models.forEach(function (item) {
                     if (!item || typeof item !== 'object') {
                         return;
@@ -2310,8 +4436,7 @@ jQuery(function ($) {
                     if (!id || !name) {
                         return;
                     }
-                    const credits = estimateCreditsByLength(item, lengthOptionId);
-                    const label = name + ' — ~' + formatCreditsValue(credits, 2) + ' ' + jsT('кр за ') + unitLabel;
+                    const label = name;
                     html += '<option value="' + escapeHtml(id) + '">' + escapeHtml(label) + '</option>';
                     if (id === currentModel) {
                         selectedExists = true;
@@ -2598,7 +4723,32 @@ jQuery(function ($) {
             $saveTemplateLabel.text(jsT('Сохранить шаблон'));
         }
 
+        function applyStep2ModeVisibility() {
+            const scenario = getScenario();
+            const supportsCreateMode = scenarioSupportsCreateNewMode(scenario);
+            if (!supportsCreateMode && $runTargetMode.length) {
+                $runTargetMode.filter('[value="update_existing"]').prop('checked', true);
+            }
+
+            const createMode = supportsCreateMode && getRunTargetMode() === 'create_new';
+            if ($runTargetModeWrap.length) {
+                $runTargetModeWrap.toggle(supportsCreateMode);
+            }
+            if ($step2CreateWrap.length) {
+                $step2CreateWrap.prop('hidden', !createMode).toggle(createMode);
+            }
+            if ($step2UpdateWrap.length) {
+                $step2UpdateWrap.prop('hidden', createMode).toggle(!createMode);
+            }
+            if ($createModeTokenWarning.length) {
+                $createModeTokenWarning.prop('hidden', !createMode).toggle(createMode);
+            }
+        }
+
         function getPlannedCount() {
+            if (isCreateNewMode()) {
+                return collectCreateTopics().length;
+            }
             if (getSelectionMode() === 'filtered') {
                 return Number(state.total || 0);
             }
@@ -2606,7 +4756,212 @@ jQuery(function ($) {
         }
 
         function getSelectionMode() {
+            if (isCreateNewMode()) {
+                return 'create_new';
+            }
             return String($selectionMode.filter(':checked').val() || 'selected');
+        }
+
+        function resetQuoteEstimateState() {
+            cancelQuoteRefreshRequest();
+            state.quoteEstimate = null;
+            state.quoteEstimateSignature = '';
+            state.quoteError = '';
+            state.quoteFailedSignature = '';
+            state.quoteFailedAt = 0;
+        }
+
+        function cancelQuoteRefreshRequest() {
+            if (state.quoteRequestTimer) {
+                window.clearTimeout(state.quoteRequestTimer);
+            }
+            state.quoteRequestTimer = null;
+            if (state.quoteRequestXhr && typeof state.quoteRequestXhr.abort === 'function') {
+                state.quoteRequestXhr.abort();
+            }
+            state.quoteRequestXhr = null;
+            state.quoteRequestInFlight = false;
+            state.quoteRequestSignature = '';
+        }
+
+        function buildRunQuoteRequestContext() {
+            const scenario = getScenario();
+            const postType = scenarioRequiresProductPostType(scenario) ? 'product' : String($postType.val() || '');
+            const plannedCount = Math.max(0, Number(getPlannedCount() || 0));
+            const selectionMode = getSelectionMode();
+            const createTopics = selectionMode === 'create_new' ? collectCreateTopics() : [];
+            const model = getEnhancedSelectValue($modelSelect) || String(state.defaultModel || 'auto');
+            const lengthOptionId = Number($lengthOption.val() || 0);
+            const varyLength = $varyLength.is(':checked') ? 1 : 0;
+            const itemsPerPost = scenarioSupportsItemsPerPost(scenario) ? normalizeItemsPerPost($itemsPerPost.val()) : 1;
+            const templateBody = String($templateBody.val() || '').trim();
+            const templateBodySeoTitle = String($templateBodySeoTitle.val() || '').trim();
+            const templateBodySeoDescription = String($templateBodySeoDescription.val() || '').trim();
+
+            let aiFields = [];
+            if (scenarioSupportsMultiFields(scenario)) {
+                const hasRenderedAiRows = getAiRowsContainers().length && getAiRowsContainers().find('.ucg-ai-field-row').length > 0;
+                aiFields = collectAiFieldsForRun();
+                if (!hasRenderedAiRows && !aiFields.length) {
+                    aiFields = normalizeTemplateAiFields(state.templateAiFields);
+                }
+                aiFields = aiFields.filter(function (field) {
+                    return !!(field && field.enabled && String(field.prompt || '').trim() !== '');
+                });
+            } else if (scenario === 'seo_tags') {
+                aiFields = buildSeoAiFieldsForRun(templateBodySeoTitle, templateBodySeoDescription, lengthOptionId).filter(function (field) {
+                    return !!(field && String(field.prompt || '').trim() !== '');
+                });
+            }
+
+            const signaturePayload = {
+                scenario: scenario,
+                post_type: postType,
+                selection_mode: selectionMode,
+                planned_count: plannedCount,
+                model: model,
+                create_topics: createTopics,
+                length_option_id: lengthOptionId,
+                vary_length: varyLength,
+                items_per_post: itemsPerPost,
+                template_body: templateBody,
+                template_body_seo_title: templateBodySeoTitle,
+                template_body_seo_description: templateBodySeoDescription,
+                ai_fields: aiFields
+            };
+            const signature = JSON.stringify(signaturePayload);
+
+            return {
+                signature: signature,
+                plannedCount: plannedCount,
+                payload: {
+                    action: 'ucg_wizard_quote',
+                    nonce: ucgAdmin.nonce,
+                    signature: signature,
+                    scenario: scenario,
+                    post_type: postType,
+                    selection_mode: selectionMode,
+                    planned_count: plannedCount,
+                    model: model,
+                    create_topics: createTopics.join('\n'),
+                    length_option_id: lengthOptionId,
+                    vary_length: varyLength,
+                    items_per_post: itemsPerPost,
+                    template_body: templateBody,
+                    template_body_seo_title: templateBodySeoTitle,
+                    template_body_seo_description: templateBodySeoDescription,
+                    ai_fields: JSON.stringify(aiFields)
+                }
+            };
+        }
+
+        function requestRunQuoteEstimate(context, requestSeq) {
+            if (!context || !context.signature) {
+                return;
+            }
+
+            const signature = String(context.signature);
+            if (state.quoteRequestXhr && typeof state.quoteRequestXhr.abort === 'function') {
+                state.quoteRequestXhr.abort();
+            }
+
+            state.quoteRequestInFlight = true;
+            state.quoteRequestSignature = signature;
+            state.quoteError = '';
+
+            state.quoteRequestXhr = $.post(ucgAdmin.ajaxUrl, context.payload).done(function (response) {
+                if (requestSeq !== state.quoteRequestSeq) {
+                    return;
+                }
+                if (!response || !response.success) {
+                    const msg = response && response.data && response.data.message
+                        ? String(response.data.message)
+                        : jsT('Не удалось уточнить стоимость через API.');
+                    state.quoteError = msg;
+                    if (!state.quoteEstimate || state.quoteEstimate.signature !== signature) {
+                        state.quoteEstimate = null;
+                        state.quoteEstimateSignature = '';
+                    }
+                    state.quoteFailedSignature = signature;
+                    state.quoteFailedAt = Date.now();
+                    renderRunSummary();
+                    return;
+                }
+
+                const data = response.data || {};
+                const responseSignature = data && data.signature ? String(data.signature) : signature;
+                state.quoteEstimate = {
+                    signature: responseSignature,
+                    data: data
+                };
+                state.quoteEstimateSignature = responseSignature;
+                state.quoteError = '';
+                state.quoteFailedSignature = '';
+                state.quoteFailedAt = 0;
+                renderRunSummary();
+            }).fail(function (_xhr, textStatus) {
+                if (requestSeq !== state.quoteRequestSeq || textStatus === 'abort') {
+                    return;
+                }
+                state.quoteError = jsT('Не удалось уточнить стоимость через API.');
+                if (!state.quoteEstimate || state.quoteEstimate.signature !== signature) {
+                    state.quoteEstimate = null;
+                    state.quoteEstimateSignature = '';
+                }
+                state.quoteFailedSignature = signature;
+                state.quoteFailedAt = Date.now();
+                renderRunSummary();
+            }).always(function () {
+                if (requestSeq !== state.quoteRequestSeq) {
+                    return;
+                }
+                state.quoteRequestInFlight = false;
+                state.quoteRequestXhr = null;
+            });
+        }
+
+        function scheduleRunQuoteRefresh() {
+            if (state.step !== 3) {
+                cancelQuoteRefreshRequest();
+                return;
+            }
+
+            const context = buildRunQuoteRequestContext();
+            if (!context || !context.signature) {
+                cancelQuoteRefreshRequest();
+                return;
+            }
+
+            const signature = String(context.signature);
+            if (context.plannedCount <= 0) {
+                cancelQuoteRefreshRequest();
+                return;
+            }
+            if (state.quoteEstimate && state.quoteEstimate.signature === signature) {
+                if (state.quoteRequestTimer) {
+                    window.clearTimeout(state.quoteRequestTimer);
+                    state.quoteRequestTimer = null;
+                }
+                return;
+            }
+            if (state.quoteRequestInFlight && state.quoteRequestSignature === signature) {
+                return;
+            }
+
+            const failCooldownMs = 10000;
+            if (state.quoteFailedSignature === signature && (Date.now() - Number(state.quoteFailedAt || 0)) < failCooldownMs) {
+                return;
+            }
+
+            if (state.quoteRequestTimer) {
+                window.clearTimeout(state.quoteRequestTimer);
+            }
+            const requestSeq = state.quoteRequestSeq + 1;
+            state.quoteRequestSeq = requestSeq;
+            state.quoteRequestTimer = window.setTimeout(function () {
+                state.quoteRequestTimer = null;
+                requestRunQuoteEstimate(context, requestSeq);
+            }, 450);
         }
 
         function updatePreviewTable(items) {
@@ -2712,9 +5067,11 @@ jQuery(function ($) {
 
         function updateSummary() {
             const mode = getSelectionMode();
+            const createMode = mode === 'create_new';
             const totalFound = Number(state.total || 0);
             const selectedManual = Number(state.selectedIds.size || 0);
-            const selectedForRun = mode === 'filtered' ? totalFound : selectedManual;
+            const createCount = createMode ? collectCreateTopics().length : 0;
+            const selectedForRun = createMode ? createCount : (mode === 'filtered' ? totalFound : selectedManual);
 
             if ($previewFoundCount.length) {
                 $previewFoundCount.text(String(totalFound));
@@ -2727,7 +5084,9 @@ jQuery(function ($) {
                 $previewSelectedCount.closest('.ucg-step2-stat').toggleClass('is-active', selectedForRun > 0);
             }
 
-            if (mode === 'filtered') {
+            if (createMode) {
+                $previewSummary.text(jsT('Будет создано элементов: ') + createCount + '.');
+            } else if (mode === 'filtered') {
                 $previewSummary.text(jsT('Будут использованы все найденные записи: ') + totalFound + '.');
             } else {
                 $previewSummary.text(jsT('Выбрано вручную: ') + selectedManual + jsT('. Найдено по фильтру: ') + totalFound + '.');
@@ -2736,10 +5095,21 @@ jQuery(function ($) {
         }
 
         function previewPosts(page, $button) {
-            const postType = String($postType.val() || '');
             const scenario = getScenario();
+            const postType = scenarioRequiresProductPostType(scenario) ? 'product' : String($postType.val() || '');
             if (!postType) {
                 setRunStatus(jsT('Выберите тип записей.'), true);
+                return;
+            }
+            if (isCreateNewMode()) {
+                state.page = 1;
+                state.total = 0;
+                state.totalPages = 1;
+                state.currentItems = [];
+                updatePreviewTable([]);
+                updatePagination();
+                updateSummary();
+                setRunStatus('', false);
                 return;
             }
 
@@ -2779,13 +5149,20 @@ jQuery(function ($) {
             });
         }
 
-        function loadTemplate(templateId) {
+        function loadTemplate(templateId, onDone) {
             const id = Number(templateId || 0);
             updateTemplateMode();
             if (!id) {
                 $templateBody.val('');
                 $templateBodySeoTitle.val('');
                 $templateBodySeoDescription.val('');
+                state.templateAiFields = [];
+                state.templateStaticFields = [];
+                updateScenarioTemplateInputs();
+                renderRunSummary();
+                if (typeof onDone === 'function') {
+                    onDone();
+                }
                 return;
             }
 
@@ -2806,6 +5183,8 @@ jQuery(function ($) {
                 $templateBody.val(String(template.body || ''));
                 $templateBodySeoTitle.val(String(template.seo_title_prompt || ''));
                 $templateBodySeoDescription.val(String(template.seo_description_prompt || ''));
+                state.templateAiFields = normalizeTemplateAiFields(template.fields);
+                state.templateStaticFields = normalizeTemplateStaticFields(template.static_fields, getScenario());
                 if (getScenario() === 'seo_tags') {
                     const fallback = String(template.body || '');
                     if (!$templateBodySeoTitle.val() && fallback) {
@@ -2817,8 +5196,15 @@ jQuery(function ($) {
                 }
                 renderTokenButtons($tokens, Array.isArray(data.tokens) ? data.tokens : []);
                 updateScenarioTemplateInputs();
+                renderRunSummary();
+                if (typeof onDone === 'function') {
+                    onDone();
+                }
             }).fail(function () {
                 setRunStatus(jsT('AJAX ошибка при загрузке шаблона.'), true);
+                if (typeof onDone === 'function') {
+                    onDone();
+                }
             });
         }
 
@@ -2838,6 +5224,7 @@ jQuery(function ($) {
                     return;
                 }
 
+                resetQuoteEstimateState();
                 state.schema = response.data || {};
                 if (state.schema && state.schema.scenario) {
                     state.scenario = String(state.schema.scenario);
@@ -2853,12 +5240,15 @@ jQuery(function ($) {
                 renderTargetFields();
                 renderTextLengthOptions();
                 renderGenerationModels();
+                state.templateAiFields = [];
+                state.templateStaticFields = [];
                 renderTemplates();
                 renderWizardTokens();
                 applyStyleDefaultsFromSchema();
                 clearFilters();
                 state.selectedIds.clear();
                 updateSelectedCount();
+                applyStep2ModeVisibility();
                 updateSummary();
                 if (typeof done === 'function') {
                     done();
@@ -2870,9 +5260,176 @@ jQuery(function ($) {
             });
         }
 
+        function applyWizardPrefill() {
+            if (state.prefillApplied) {
+                return false;
+            }
+            const prefill = state.prefill && typeof state.prefill === 'object' ? state.prefill : {};
+            if (!Object.keys(prefill).length) {
+                state.prefillApplied = true;
+                return false;
+            }
+            state.prefillApplied = true;
+
+            const desiredScenario = String(prefill.scenario || getScenario() || 'field_update');
+            let desiredPostType = String(prefill.post_type || $postType.val() || '');
+            if (scenarioRequiresProductPostType(desiredScenario) && $postType.find('option[value="product"]').length) {
+                desiredPostType = 'product';
+            }
+            const currentScenario = getScenario();
+            const currentPostType = String($postType.val() || '');
+            const needsScenarioRefresh = !!(desiredScenario && desiredScenario !== currentScenario);
+            const needsPostTypeRefresh = !!(desiredPostType && desiredPostType !== currentPostType);
+
+            const applyValues = function () {
+                if (prefill.target_field) {
+                    setEnhancedSelectValue($targetField, String(prefill.target_field));
+                }
+
+                const prefillLength = Number(prefill.length_option_id || 0);
+                if (prefillLength > 0 && $lengthOption.find('option[value="' + prefillLength + '"]').length) {
+                    setEnhancedSelectValue($lengthOption, String(prefillLength));
+                }
+
+                if (prefill.model && $modelSelect.find('option[value="' + String(prefill.model) + '"]').length) {
+                    setEnhancedSelectValue($modelSelect, String(prefill.model));
+                }
+
+                if ($varyLength.length) {
+                    $varyLength.prop('checked', Number(prefill.vary_length || 0) === 1);
+                }
+                if ($itemsPerPost.length && Number(prefill.items_per_post || 0) > 0) {
+                    $itemsPerPost.val(String(normalizeItemsPerPost(prefill.items_per_post)));
+                }
+                if ($wooRatingMin.length && Number(prefill.rating_min || 0) > 0) {
+                    $wooRatingMin.val(String(normalizeWooRatingValue(prefill.rating_min)));
+                }
+                if ($wooRatingMax.length && Number(prefill.rating_max || 0) > 0) {
+                    $wooRatingMax.val(String(normalizeWooRatingValue(prefill.rating_max)));
+                }
+                if ($publishDateFrom.length && prefill.publish_date_from) {
+                    $publishDateFrom.val(String(prefill.publish_date_from));
+                }
+                if ($publishDateTo.length && prefill.publish_date_to) {
+                    $publishDateTo.val(String(prefill.publish_date_to));
+                }
+                if (prefill.style_language) {
+                    setEnhancedSelectValue($styleLanguage, String(prefill.style_language));
+                }
+                if (prefill.style_tone) {
+                    setEnhancedSelectValue($styleTone, String(prefill.style_tone));
+                }
+
+                if (prefill.template_body) {
+                    $templateBody.val(String(prefill.template_body));
+                }
+                if (prefill.template_body_seo_title) {
+                    $templateBodySeoTitle.val(String(prefill.template_body_seo_title));
+                }
+                if (prefill.template_body_seo_description) {
+                    $templateBodySeoDescription.val(String(prefill.template_body_seo_description));
+                }
+
+                const prefillAiFields = normalizeTemplateAiFields(prefill.ai_fields);
+                const prefillStaticFields = normalizeTemplateStaticFields(prefill.static_fields, desiredScenario);
+                state.templateAiFields = prefillAiFields;
+                state.templateStaticFields = prefillStaticFields;
+
+                clearFilters();
+                const filters = Array.isArray(prefill.filters) ? prefill.filters : [];
+                filters.forEach(function (filter) {
+                    renderFilterRow(filter);
+                });
+
+                const mode = String(prefill.selection_mode || 'selected');
+                const supportsCreateMode = scenarioSupportsCreateNewMode(getScenario());
+                if (supportsCreateMode && $runTargetMode.length) {
+                    const runTargetMode = mode === 'create_new' ? 'create_new' : 'update_existing';
+                    $runTargetMode.prop('checked', false);
+                    $runTargetMode.filter('[value="' + runTargetMode + '"]').prop('checked', true);
+                } else if ($runTargetMode.length) {
+                    $runTargetMode.prop('checked', false);
+                    $runTargetMode.filter('[value="update_existing"]').prop('checked', true);
+                }
+                const selectionMode = mode === 'filtered' ? 'filtered' : 'selected';
+                $selectionMode.prop('checked', false);
+                $selectionMode.filter('[value="' + selectionMode + '"]').prop('checked', true);
+                const prefillTopics = normalizeCreateTopics(prefill.create_topics || prefill.create_topics_text || '');
+                if ($createTopics.length) {
+                    $createTopics.val(prefillTopics.join('\n'));
+                }
+                applyStep2ModeVisibility();
+                updateSummary();
+
+                const templateId = Number(prefill.template_id || 0);
+                if (templateId > 0 && $templateSelect.find('option[value="' + templateId + '"]').length) {
+                    setEnhancedSelectValue($templateSelect, String(templateId));
+                    loadTemplate(templateId, function () {
+                        if (prefill.template_body) {
+                            $templateBody.val(String(prefill.template_body));
+                        }
+                        if (prefill.template_body_seo_title) {
+                            $templateBodySeoTitle.val(String(prefill.template_body_seo_title));
+                        }
+                        if (prefill.template_body_seo_description) {
+                            $templateBodySeoDescription.val(String(prefill.template_body_seo_description));
+                        }
+                        if (prefillAiFields.length) {
+                            state.templateAiFields = prefillAiFields;
+                        }
+                        if (prefillStaticFields.length) {
+                            state.templateStaticFields = prefillStaticFields;
+                        }
+                        updateScenarioTemplateInputs();
+                        renderRunSummary();
+                    });
+                } else {
+                    setEnhancedSelectValue($templateSelect, '');
+                    updateTemplateMode();
+                    updateScenarioTemplateInputs();
+                    renderRunSummary();
+                }
+
+                state.page = 1;
+                if (!isCreateNewMode()) {
+                    previewPosts(1, $('#ucg-preview-posts'));
+                } else {
+                    updateSummary();
+                }
+
+                const repeatRunId = Number(prefill.repeat_run_id || 0);
+                if (repeatRunId > 0) {
+                    setRunStatus(jsT('Загружены параметры запуска #') + repeatRunId + '.', false, {
+                        type: 'info',
+                        key: 'run-prefill',
+                        force: true
+                    });
+                }
+            };
+
+            if (needsScenarioRefresh && desiredScenario) {
+                $scenarioInputs.prop('checked', false);
+                $scenarioInputs.filter('[value="' + desiredScenario + '"]').prop('checked', true);
+                state.scenario = desiredScenario;
+                setScenarioCardState();
+            }
+            if (needsPostTypeRefresh && desiredPostType) {
+                setEnhancedSelectValue($postType, desiredPostType);
+            }
+
+            if (needsScenarioRefresh || needsPostTypeRefresh) {
+                const postTypeForSchema = desiredPostType || String($postType.val() || '');
+                refreshSchema(postTypeForSchema, applyValues, $('#ucg-step-1-next'), false);
+                return true;
+            }
+
+            applyValues();
+            return true;
+        }
+
         function startRun($button) {
             const scenario = getScenario();
-            const postType = String($postType.val() || '');
+            const postType = scenarioRequiresProductPostType(scenario) ? 'product' : String($postType.val() || '');
             const targetField = String($targetField.val() || '');
             const itemsPerPost = scenarioSupportsItemsPerPost(scenario) ? normalizeItemsPerPost($itemsPerPost.val()) : 1;
             const wooRatingRange = collectWooRatingRangeForRun(scenario);
@@ -2882,24 +5439,28 @@ jQuery(function ($) {
             const templateBodySeoTitle = String($templateBodySeoTitle.val() || '').trim();
             const templateBodySeoDescription = String($templateBodySeoDescription.val() || '').trim();
             const mode = getSelectionMode();
-            const filters = normalizeFilters();
+            const createMode = mode === 'create_new';
+            const createTopics = createMode ? collectCreateTopics() : [];
+            const createCount = createMode ? createTopics.length : 0;
+            const filters = createMode ? [] : normalizeFilters();
             const lengthOptionId = Number($lengthOption.val() || 0);
             const model = getEnhancedSelectValue($modelSelect) || String(state.defaultModel || 'auto');
             const varyLength = $varyLength.is(':checked') ? 1 : 0;
             const publishDateRange = collectPublishDateRangeForRun(scenario);
             const styleLanguage = String($styleLanguage.val() || (state.schema && state.schema.settings && state.schema.settings.default_language) || 'auto');
             const styleTone = String($styleTone.val() || (state.schema && state.schema.settings && state.schema.settings.default_tone) || 'neutral');
-            const styleUniqueness = String($styleUniqueness.val() || (state.schema && state.schema.settings && state.schema.settings.default_uniqueness) || 'medium');
+            const aiFields = scenarioSupportsMultiFields(scenario) ? collectAiFieldsForRun() : [];
+            const staticFields = scenarioSupportsMultiFields(scenario) ? collectStaticFieldsForRun() : [];
 
             if (!postType) {
                 setRunStatus(jsT('Выберите тип записей.'), true);
-                switchStep(1);
+                switchStep(2);
                 return;
             }
 
-            if (!targetField && !scenarioSupportsItemsPerPost(scenario)) {
+            if (!targetField && !scenarioSupportsItemsPerPost(scenario) && !scenarioSupportsMultiFields(scenario)) {
                 setRunStatus(jsT('Выберите целевое поле.'), true);
-                switchStep(1);
+                switchStep(2);
                 return;
             }
 
@@ -2918,12 +5479,28 @@ jQuery(function ($) {
                     setRunStatus(jsT('Заполните шаблоны для SEO title и SEO description.'), true);
                     return;
                 }
+            } else if (scenarioSupportsMultiFields(scenario)) {
+                const hasEnabledAi = aiFields.some(function (field) {
+                    return !!(field && field.enabled && String(field.prompt || '').trim() !== '');
+                });
+                const hasEnabledAiWithoutPrompt = aiFields.some(function (field) {
+                    return !!(field && field.enabled && String(field.prompt || '').trim() === '');
+                });
+                const hasEnabledStatic = hasEnabledStaticFields(staticFields);
+                if (hasEnabledAiWithoutPrompt) {
+                    setRunStatus(jsT('Для включённых AI-полей заполните промпт.'), true);
+                    return;
+                }
+                if (!hasEnabledAi && !hasEnabledStatic) {
+                    setRunStatus(jsT('Выберите хотя бы одно AI или static поле.'), true);
+                    return;
+                }
             } else if (!templateBody) {
                 setRunStatus(jsT('Шаблон пустой. Заполните текст.'), true);
                 return;
             }
 
-            if (lengthOptionId <= 0) {
+            if (lengthOptionId <= 0 && !scenarioSupportsMultiFields(scenario)) {
                 setRunStatus(jsT('Выберите диапазон длины текста.'), true);
                 return;
             }
@@ -2933,7 +5510,13 @@ jQuery(function ($) {
                 return;
             }
 
-            if (mode === 'selected' && state.selectedIds.size === 0) {
+            if (createMode && createCount <= 0) {
+                setRunStatus(jsT('Добавьте хотя бы одну тему для создания.'), true);
+                switchStep(2);
+                return;
+            }
+
+            if (!createMode && mode === 'selected' && state.selectedIds.size === 0) {
                 setRunStatus(jsT('Выберите записи вручную или переключитесь на режим "все найденные".'), true);
                 switchStep(2);
                 return;
@@ -2947,7 +5530,7 @@ jQuery(function ($) {
             });
             setButtonLoading($button, true);
 
-            $.post(ucgAdmin.ajaxUrl, {
+            const payload = {
                 action: 'ucg_wizard_create_run',
                 nonce: ucgAdmin.nonce,
                 scenario: scenario,
@@ -2958,7 +5541,6 @@ jQuery(function ($) {
                 rating_max: wooRatingRange.ratingMax,
                 style_language: styleLanguage,
                 style_tone: styleTone,
-                style_uniqueness: styleUniqueness,
                 model: model,
                 template_id: templateId,
                 template_name: templateName,
@@ -2971,9 +5553,21 @@ jQuery(function ($) {
                 publish_date_to: publishDateRange.to,
                 save_template: $saveTemplateChanges.is(':checked') ? 1 : 0,
                 selection_mode: mode,
-                selected_ids: JSON.stringify(Array.from(state.selectedIds)),
+                create_count: createCount,
+                create_topics: createTopics.join('\n'),
+                selected_ids: JSON.stringify(createMode ? [] : Array.from(state.selectedIds)),
                 filters: JSON.stringify(filters)
-            }).done(function (response) {
+            };
+            if (scenarioSupportsMultiFields(scenario)) {
+                payload.ai_fields = JSON.stringify(aiFields);
+                payload.static_fields = JSON.stringify(staticFields);
+            } else if (scenario === 'seo_tags') {
+                payload.ai_fields = JSON.stringify(
+                    buildSeoAiFieldsForRun(templateBodySeoTitle, templateBodySeoDescription, lengthOptionId)
+                );
+            }
+
+            $.post(ucgAdmin.ajaxUrl, payload).done(function (response) {
                 if (!response.success) {
                     const msg = response.data && response.data.message ? response.data.message : jsT('Не удалось создать запуск.');
                     setRunStatus(msg, true, { type: 'error', key: 'run-create', force: true });
@@ -3013,39 +5607,213 @@ jQuery(function ($) {
             });
         }
 
+        function parseLegacyMultiFieldPreview(rawPreview) {
+            const text = String(rawPreview || '').trim();
+            if (!text || text.indexOf(':\n') === -1) {
+                return [];
+            }
+
+            const chunks = text.split(/\n{2,}/);
+            const parsed = [];
+            let invalidChunkFound = false;
+            chunks.forEach(function (chunk) {
+                const normalizedChunk = String(chunk || '').trim();
+                if (!normalizedChunk) {
+                    return;
+                }
+                const match = normalizedChunk.match(/^([^:\n]{1,120}):\n([\s\S]*)$/);
+                if (!match) {
+                    invalidChunkFound = true;
+                    return;
+                }
+                const label = String(match[1] || '').trim();
+                const value = String(match[2] || '').trim();
+                if (!label) {
+                    invalidChunkFound = true;
+                    return;
+                }
+                parsed.push({
+                    label: label,
+                    value: value
+                });
+            });
+
+            if (invalidChunkFound || !parsed.length) {
+                return [];
+            }
+            return parsed;
+        }
+
+        function renderExampleFieldCards(fields, title) {
+            const normalizedFields = Array.isArray(fields) ? fields.filter(function (field) {
+                return field && String(field.label || '').trim() !== '';
+            }) : [];
+            if (!normalizedFields.length) {
+                return '';
+            }
+
+            const cardTitle = String(title || jsT('Пример генерации'));
+            const gridClass = normalizedFields.length > 1 ? ' ucg-example-fields--grid' : '';
+            const fieldsHtml = normalizedFields.map(function (field) {
+                const label = String(field.label || '').trim();
+                const value = String(field.value == null ? '' : field.value).trim();
+                const images = Array.isArray(field.images) ? field.images.map(function (image) {
+                    return String(image || '').trim();
+                }).filter(function (image) {
+                    return /^https?:\/\//i.test(image) || /^data:image\//i.test(image);
+                }) : [];
+                const imagesHtml = images.length ? (
+                    '<div class="ucg-example-field__images">' +
+                    images.map(function (imageSrc, imageIndex) {
+                        return (
+                            '<figure class="ucg-example-field__image-item">' +
+                            '  <img class="ucg-example-field__image" src="' + escapeHtml(imageSrc) + '" alt="' + escapeHtml(label + ' #' + (imageIndex + 1)) + '">' +
+                            '</figure>'
+                        );
+                    }).join('') +
+                    '</div>'
+                ) : '';
+                return '' +
+                    '<article class="ucg-example-field">' +
+                    '  <h5 class="ucg-example-field__label">' + escapeHtml(label) + '</h5>' +
+                    '  <p class="ucg-example-field__value">' + escapeHtml(value || jsT('Пусто')) + '</p>' +
+                    imagesHtml +
+                    '</article>';
+            }).join('');
+
+            return '' +
+                '<article class="ucg-example-card">' +
+                '  <h4 class="ucg-example-card__title">' + escapeHtml(cardTitle) + '</h4>' +
+                '  <div class="ucg-example-fields' + gridClass + '">' + fieldsHtml + '</div>' +
+                '</article>';
+        }
+
+        function renderExampleOutput(preview) {
+            if (!$exampleOutput.length) {
+                return;
+            }
+
+            let html = '';
+            if (preview && typeof preview === 'object') {
+                const fieldsFromObject = Array.isArray(preview.fields) ? preview.fields.map(function (field) {
+                    if (!field || typeof field !== 'object') {
+                        return null;
+                    }
+                    const label = String(field.label || field.key || '').trim();
+                    const value = String(field.value == null ? '' : field.value).trim();
+                    const images = Array.isArray(field.images) ? field.images.map(function (image) {
+                        return String(image || '').trim();
+                    }).filter(function (image) {
+                        return /^https?:\/\//i.test(image) || /^data:image\//i.test(image);
+                    }) : [];
+                    if (!label) {
+                        return null;
+                    }
+                    return { label: label, value: value, images: images };
+                }).filter(Boolean) : [];
+
+                if (fieldsFromObject.length) {
+                    const previewTitle = String(preview.title || jsT('Пример по полям'));
+                    html = renderExampleFieldCards(fieldsFromObject, previewTitle);
+                } else if (preview.title || preview.description) {
+                    html = renderExampleFieldCards(
+                        [
+                            { label: 'SEO title', value: String(preview.title || '') },
+                            { label: 'SEO description', value: String(preview.description || '') }
+                        ],
+                        jsT('SEO превью')
+                    );
+                } else if (preview.field_label || preview.text) {
+                    html = renderExampleFieldCards(
+                        [
+                            { label: String(preview.field_label || jsT('Поле')), value: String(preview.text || '') }
+                        ],
+                        jsT('Пример поля')
+                    );
+                }
+            }
+
+            if (!html) {
+                const previewText = String(preview == null ? '' : preview).trim();
+                const parsedLegacyFields = parseLegacyMultiFieldPreview(previewText);
+                if (parsedLegacyFields.length) {
+                    html = renderExampleFieldCards(parsedLegacyFields, jsT('Пример по полям'));
+                } else if (previewText) {
+                    html = renderExampleFieldCards(
+                        [{ label: jsT('Результат'), value: previewText }],
+                        jsT('Пример результата')
+                    );
+                }
+            }
+
+            if (!html) {
+                html = '<p class="ucg-example-output__empty">' + escapeHtml(jsT('Нет данных для превью.')) + '</p>';
+            }
+            $exampleOutput.html(html);
+        }
+
         function generateExample($button) {
             const scenario = getScenario();
-            const postType = String($postType.val() || '');
+            const postType = scenarioRequiresProductPostType(scenario) ? 'product' : String($postType.val() || '');
             const targetField = String($targetField.val() || '');
             const wooRatingRange = collectWooRatingRangeForRun(scenario);
             const templateBody = String($templateBody.val() || '').trim();
             const templateBodySeoTitle = String($templateBodySeoTitle.val() || '').trim();
             const templateBodySeoDescription = String($templateBodySeoDescription.val() || '').trim();
             const mode = getSelectionMode();
-            const filters = normalizeFilters();
+            const createMode = mode === 'create_new';
+            const createTopics = createMode ? collectCreateTopics() : [];
+            const filters = createMode ? [] : normalizeFilters();
             const lengthOptionId = Number($lengthOption.val() || 0);
             const model = getEnhancedSelectValue($modelSelect) || String(state.defaultModel || 'auto');
             const varyLength = $varyLength.is(':checked') ? 1 : 0;
             const styleLanguage = String($styleLanguage.val() || (state.schema && state.schema.settings && state.schema.settings.default_language) || 'auto');
             const styleTone = String($styleTone.val() || (state.schema && state.schema.settings && state.schema.settings.default_tone) || 'neutral');
-            const styleUniqueness = String($styleUniqueness.val() || (state.schema && state.schema.settings && state.schema.settings.default_uniqueness) || 'medium');
+            const aiFields = scenarioSupportsMultiFields(scenario) ? collectAiFieldsForRun() : [];
+            const staticFields = scenarioSupportsMultiFields(scenario) ? collectStaticFieldsForRun() : [];
 
             if (!postType) {
                 setRunStatus(jsT('Выберите тип записей.'), true);
-                switchStep(1);
+                switchStep(2);
+                return;
+            }
+            if (!targetField && !scenarioSupportsItemsPerPost(scenario) && !scenarioSupportsMultiFields(scenario)) {
+                setRunStatus(jsT('Выберите целевое поле.'), true);
+                switchStep(2);
                 return;
             }
             if (!wooRatingRange.valid) {
                 setRunStatus(wooRatingRange.message || jsT('Проверьте диапазон рейтинга.'), true);
                 return;
             }
-            if (lengthOptionId <= 0) {
+            if (lengthOptionId <= 0 && !scenarioSupportsMultiFields(scenario)) {
                 setRunStatus(jsT('Выберите диапазон длины текста.'), true);
                 return;
             }
             if (scenario === 'seo_tags') {
                 if (!templateBodySeoTitle || !templateBodySeoDescription) {
                     setRunStatus(jsT('Заполните шаблоны для SEO title и SEO description.'), true);
+                    return;
+                }
+            } else if (scenarioSupportsMultiFields(scenario)) {
+                if (createMode && createTopics.length <= 0) {
+                    setRunStatus(jsT('Добавьте хотя бы одну тему для создания.'), true);
+                    switchStep(2);
+                    return;
+                }
+                const hasEnabledAiWithoutPrompt = aiFields.some(function (field) {
+                    return !!(field && field.enabled && String(field.prompt || '').trim() === '');
+                });
+                if (hasEnabledAiWithoutPrompt) {
+                    setRunStatus(jsT('Для включённых AI-полей заполните промпт.'), true);
+                    return;
+                }
+                const hasEnabledAi = aiFields.some(function (field) {
+                    return !!(field && field.enabled && String(field.prompt || '').trim() !== '');
+                });
+                const hasEnabledStatic = hasEnabledStaticFields(staticFields);
+                if (!hasEnabledAi && !hasEnabledStatic) {
+                    setRunStatus(jsT('Выберите хотя бы одно AI или static поле.'), true);
                     return;
                 }
             } else if (!templateBody) {
@@ -3060,7 +5828,7 @@ jQuery(function ($) {
                 force: true
             });
 
-            $.post(ucgAdmin.ajaxUrl, {
+            const payload = {
                 action: 'ucg_wizard_example',
                 nonce: ucgAdmin.nonce,
                 scenario: scenario,
@@ -3076,11 +5844,21 @@ jQuery(function ($) {
                 rating_max: wooRatingRange.ratingMax,
                 style_language: styleLanguage,
                 style_tone: styleTone,
-                style_uniqueness: styleUniqueness,
                 selection_mode: mode,
-                selected_ids: JSON.stringify(Array.from(state.selectedIds)),
+                create_topics: createTopics.join('\n'),
+                selected_ids: JSON.stringify(createMode ? [] : Array.from(state.selectedIds)),
                 filters: JSON.stringify(filters)
-            }).done(function (response) {
+            };
+            if (scenarioSupportsMultiFields(scenario)) {
+                payload.ai_fields = JSON.stringify(aiFields);
+                payload.static_fields = JSON.stringify(staticFields);
+            } else if (scenario === 'seo_tags') {
+                payload.ai_fields = JSON.stringify(
+                    buildSeoAiFieldsForRun(templateBodySeoTitle, templateBodySeoDescription, lengthOptionId)
+                );
+            }
+
+            $.post(ucgAdmin.ajaxUrl, payload).done(function (response) {
                 if (!response.success) {
                     const msg = response.data && response.data.message ? response.data.message : jsT('Не удалось сгенерировать пример.');
                     setRunStatus(msg, true, { type: 'error', key: 'example-generate', force: true });
@@ -3090,14 +5868,8 @@ jQuery(function ($) {
                 const preview = data.preview;
                 const spent = Number(data.credits_spent || 0);
                 const remaining = Number(data.credits_remaining || 0);
-                let text = '';
-                if (preview && typeof preview === 'object' && (preview.title || preview.description)) {
-                    text = 'SEO title:\n' + String(preview.title || '') + '\n\nSEO description:\n' + String(preview.description || '');
-                } else {
-                    text = String(preview || '');
-                }
                 if ($exampleOutput.length) {
-                    $exampleOutput.val(text);
+                    renderExampleOutput(preview);
                 }
                 if ($exampleCredits.length) {
                     $exampleCredits.text(
@@ -3233,22 +6005,12 @@ jQuery(function ($) {
 
             $('#ucg-step-1-next').on('click', function () {
                 const scenario = getScenario();
-                const postType = String($postType.val() || '');
-                const targetField = String($targetField.val() || '');
                 if (!scenario) {
                     setRunStatus(jsT('Выберите сценарий генерации.'), true);
                     return;
                 }
-                if (!postType) {
-                    setRunStatus(jsT('Выберите тип записей.'), true);
-                    return;
-                }
-                if (!targetField && !scenarioSupportsItemsPerPost(scenario)) {
-                    setRunStatus(jsT('Выберите целевое поле.'), true);
-                    return;
-                }
                 switchStep(2);
-                if (state.total === 0) {
+                if (!isCreateNewMode() && state.total === 0) {
                     previewPosts(1, $('#ucg-preview-posts'));
                 }
             });
@@ -3258,8 +6020,27 @@ jQuery(function ($) {
             });
 
             $('#ucg-step-2-next').on('click', function () {
+                const scenario = getScenario();
+                const postType = scenarioRequiresProductPostType(scenario) ? 'product' : String($postType.val() || '');
+                const targetField = String($targetField.val() || '');
                 const mode = getSelectionMode();
                 const planned = getPlannedCount();
+                if (!postType) {
+                    setRunStatus(jsT('Выберите тип записей.'), true);
+                    return;
+                }
+                if (!targetField && !scenarioSupportsItemsPerPost(scenario) && !scenarioSupportsMultiFields(scenario)) {
+                    setRunStatus(jsT('Выберите целевое поле.'), true);
+                    return;
+                }
+                if (mode === 'create_new') {
+                    if (planned <= 0) {
+                        setRunStatus(jsT('Добавьте хотя бы одну тему для создания.'), true);
+                        return;
+                    }
+                    switchStep(3);
+                    return;
+                }
                 if (mode === 'selected' && planned <= 0) {
                     setRunStatus(jsT('Выберите записи вручную или переключитесь на режим "все найденные".'), true);
                     return;
@@ -3283,7 +6064,12 @@ jQuery(function ($) {
             });
 
             $postType.on('change', function () {
-                const postType = String($(this).val() || '');
+                const scenario = getScenario();
+                let postType = String($(this).val() || '');
+                if (scenarioRequiresProductPostType(scenario) && $postType.find('option[value="product"]').length) {
+                    postType = 'product';
+                    setPostTypeValueSilently(postType);
+                }
                 const $btn = $('#ucg-step-1-next');
                 refreshSchema(postType, function () {
                     state.page = 1;
@@ -3296,8 +6082,16 @@ jQuery(function ($) {
             });
 
             $scenarioInputs.on('change', function () {
-                getScenario();
-                const postType = String($postType.val() || '');
+                const scenario = getScenario();
+                if (scenarioSupportsCreateNewMode(scenario) && $runTargetMode.length) {
+                    $runTargetMode.prop('checked', false);
+                    $runTargetMode.filter('[value="create_new"]').prop('checked', true);
+                }
+                let postType = applyPostTypeSelectionVisibility(scenario) || String($postType.val() || '');
+                if (scenario === 'post_fields' && $postType.find('option[value="post"]').length) {
+                    postType = 'post';
+                    setPostTypeValueSilently(postType);
+                }
                 const $btn = $('#ucg-step-1-next');
                 refreshSchema(postType, function () {
                     state.page = 1;
@@ -3315,6 +6109,45 @@ jQuery(function ($) {
 
             $modelSelect.on('change', function () {
                 updateModelHint();
+            });
+
+            $(document).on('click', '.ucg-ai-field-toggle', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleAiFieldRow($(this).closest('.ucg-ai-field-row'));
+            });
+
+            $(document).on('click', '.ucg-ai-field-row__head', function (event) {
+                const $target = $(event.target);
+                if ($target.closest('input, button, select, textarea, a').length) {
+                    return;
+                }
+                toggleAiFieldRow($(this).closest('.ucg-ai-field-row'));
+            });
+
+            $(document).on('change', '.ucg-ai-field-enabled, .ucg-ai-field-length, .ucg-ai-field-image-model, .ucg-ai-field-aspect-ratio, .ucg-ai-field-image-size, .ucg-ai-field-images-count', function () {
+                refreshAiFieldRowsUi();
+                renderRunSummary();
+            });
+
+            $(document).on('keyup', '.ucg-ai-field-prompt', function () {
+                renderRunSummary();
+            });
+
+            $(document).on('input', '.ucg-ai-field-images-count', function () {
+                const parsed = Number($(this).val() || 1);
+                const normalized = Number.isFinite(parsed) ? Math.max(1, Math.min(8, Math.round(parsed))) : 1;
+                $(this).val(String(normalized));
+                renderRunSummary();
+            });
+
+            $(document).on('change keyup', '.ucg-static-field-enabled, .ucg-static-field-value, .ucg-static-field-value-check', function () {
+                refreshStaticFieldRowsUi();
+                renderRunSummary();
+            });
+
+            $(document).on('focus', '.ucg-ai-field-prompt', function () {
+                $activeTemplateTextarea = $(this);
             });
 
             $wizardTokenSearch.on('input', function () {
@@ -3395,6 +6228,24 @@ jQuery(function ($) {
                 updateSummary();
             });
 
+            $runTargetMode.on('change', function () {
+                applyStep2ModeVisibility();
+                if (isCreateNewMode()) {
+                    setRunStatus('', false);
+                    updateSummary();
+                    return;
+                }
+                if (state.step === 2 && state.total === 0) {
+                    previewPosts(1, $('#ucg-preview-posts'));
+                    return;
+                }
+                updateSummary();
+            });
+
+            $createTopics.on('change keyup', function () {
+                updateSummary();
+            });
+
             $('#ucg-start-run').on('click', function () {
                 startRun($(this));
             });
@@ -3466,11 +6317,35 @@ jQuery(function ($) {
         const hasSchemaLengthOptions = Array.isArray(state.schema.text_length_options) && state.schema.text_length_options.length > 0;
         if (!hasSchemaTargetFields || !hasSchemaLengthOptions) {
             refreshSchema(String($postType.val() || ''), function () {
-                previewPosts(1, $('#ucg-preview-posts'));
+                const prefillHandled = applyWizardPrefill();
+                if (!prefillHandled) {
+                    if (scenarioSupportsCreateNewMode(getScenario()) && $runTargetMode.length) {
+                        $runTargetMode.prop('checked', false);
+                        $runTargetMode.filter('[value="create_new"]').prop('checked', true);
+                    }
+                    applyStep2ModeVisibility();
+                    if (!isCreateNewMode()) {
+                        previewPosts(1, $('#ucg-preview-posts'));
+                    } else {
+                        updateSummary();
+                    }
+                }
             }, null, true);
             return;
         }
-        previewPosts(1, $('#ucg-preview-posts'));
+        const prefillHandled = applyWizardPrefill();
+        if (!prefillHandled) {
+            if (scenarioSupportsCreateNewMode(getScenario()) && $runTargetMode.length) {
+                $runTargetMode.prop('checked', false);
+                $runTargetMode.filter('[value="create_new"]').prop('checked', true);
+            }
+            applyStep2ModeVisibility();
+            if (!isCreateNewMode()) {
+                previewPosts(1, $('#ucg-preview-posts'));
+            } else {
+                updateSummary();
+            }
+        }
     }
 
     function initRunProgressPage() {
@@ -3541,9 +6416,34 @@ jQuery(function ($) {
                 return;
             }
 
+            function formatItemStatusLabel(entry) {
+                const normalized = String(entry && entry.status ? entry.status : '').trim().toLowerCase();
+                const fallbackLabel = entry && entry.status_label ? String(entry.status_label).trim() : '';
+                if (normalized === 'approved') {
+                    return jsT('Применено');
+                }
+                if (normalized === 'generated') {
+                    return jsT('Сгенерировано (ожидает проверки)');
+                }
+                if (normalized === 'failed') {
+                    return jsT('Ошибка');
+                }
+                if (normalized === 'queued') {
+                    return jsT('В очереди');
+                }
+                if (normalized === 'running') {
+                    return jsT('Обрабатывается');
+                }
+                const fallbackNormalized = fallbackLabel.toLowerCase();
+                if (fallbackNormalized === jsT('Одобрено').toLowerCase() || fallbackNormalized === 'approved') {
+                    return jsT('Применено');
+                }
+                return fallbackLabel || jsT('Статус');
+            }
+
             const lines = logs.map(function (entry) {
                 const postId = Number(entry && entry.post_id ? entry.post_id : 0);
-                const statusLabel = entry && entry.status_label ? String(entry.status_label) : jsT('Статус');
+                const statusLabel = formatItemStatusLabel(entry);
                 const error = entry && entry.error_message ? String(entry.error_message) : '';
                 const timestamp = entry && entry.updated_at ? String(entry.updated_at) : '';
                 let text = timestamp ? ('[' + timestamp + '] ') : '';

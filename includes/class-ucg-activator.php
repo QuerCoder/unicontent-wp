@@ -66,6 +66,7 @@ if (!class_exists('UCG_Activator')) {
                 status VARCHAR(20) NOT NULL DEFAULT 'queued',
                 prompt LONGTEXT NULL,
                 generated_text LONGTEXT NULL,
+                generated_fields_json LONGTEXT NULL,
                 error_message TEXT NULL,
                 credits_spent DECIMAL(10,2) NULL,
                 credits_remaining DECIMAL(10,2) NULL,
@@ -148,6 +149,12 @@ if (!class_exists('UCG_Activator')) {
                     $wpdb->query("ALTER TABLE {$items_table} DROP INDEX run_post");
                 }
                 $wpdb->query("ALTER TABLE {$items_table} ADD UNIQUE KEY run_post (run_id, post_id, item_index)");
+            }
+
+            // Ensure generated_fields_json exists for multi-field generation payloads.
+            $has_generated_fields_json = $wpdb->get_var("SHOW COLUMNS FROM {$items_table} LIKE 'generated_fields_json'");
+            if (!$has_generated_fields_json) {
+                $wpdb->query("ALTER TABLE {$items_table} ADD COLUMN generated_fields_json LONGTEXT NULL AFTER generated_text");
             }
         }
 
